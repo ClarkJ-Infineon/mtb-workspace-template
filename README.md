@@ -18,7 +18,7 @@ Works with **GitHub Copilot Chat in VS Code** and **GitHub Copilot CLI**.
 
 ## Installation
 
-> **No scripts to run.** Copy three items from this repo into your MTB project root.
+> **No scripts to run.** Copy selected items from this repo into your MTB project root.
 
 ### Step 1 — Download this repository
 
@@ -31,13 +31,18 @@ git clone https://github.com/ClarkJ-Infineon/mtb-workspace-template.git
 
 ### Step 2 — Copy files into your MTB project
 
-From the extracted/cloned folder, copy these three items into the **root of your ModusToolbox project**:
+From the extracted/cloned folder, copy these items into the **root of your ModusToolbox project**:
 
 ```
 .github/          → your-mtb-project/.github/
 CONTEXT.md        → your-mtb-project/CONTEXT.md
+reference/        → your-mtb-project/reference/
 memories/         → your-mtb-project/memories/
 ```
+
+> **Do NOT copy** `README.md`, `README-TEMPLATE.md`, or `LICENSE` — these are about the template itself, not your project.
+>
+> **For your project README:** Copy `README-TEMPLATE.md` to your project root, rename it to `README.md`, and fill in the sections. Or use `#readme` in Copilot Chat to generate one from your code.
 
 > **If your project already has a `.github/` folder** (e.g., with GitHub Actions workflows), copy the contents rather than replacing the folder:
 > - Copy `.github/copilot-instructions.md` into your existing `.github/`
@@ -78,16 +83,45 @@ That's it. Open the project in VS Code — Copilot now has full MTB context.
 #file:CONTEXT.md  #build-error  [paste your build output here]
 ```
 
-### Available skills
+### Available prompts
 
-Type `#` in Copilot Chat to invoke the included prompt files:
+Type `#` in Copilot Chat to invoke the included prompt files. Use `#mtb-help` to see the full catalog with descriptions.
 
-| Skill | What it does |
-|-------|-------------|
-| `#add-library` | Add a library dependency — reads the library's GitHub README for correct COMPONENTS and DEFINES, creates the `.mtb` entry, updates the Makefile |
-| `#new-module` | Scaffold a new `.c`/`.h` source module with correct Doxygen file headers populated from your CONTEXT.md |
-| `#device-configurator-spec` | Generate a Device Configurator setup specification for a peripheral (what to configure in the MTB IDE GUI) |
-| `#build-error` | Diagnose a build failure — works through common MTB root causes: missing `make getlibs`, wrong HAL prefix, missing COMPONENTS, wrong TARGET, and more |
+**Discovery:**
+| Prompt | What it does |
+|--------|-------------|
+| `#mtb-help` | Full catalog of all available prompts with descriptions and usage examples |
+
+**Project Setup:**
+| Prompt | What it does |
+|--------|-------------|
+| `#dual-core-setup` | Configure PSOC Edge for active CM55: boot handshake, IPC init, project structure |
+| `#new-module` | Scaffold a new `.c`/`.h` source module with correct Doxygen file headers |
+
+**Connectivity:**
+| Prompt | What it does |
+|--------|-------------|
+| `#wifi-mqtt` | WiFi STA connection, MQTT publish/subscribe, TLS configuration, reconnection |
+| `#ble-setup` | BTSTACK v4 API patterns, GATT service definition, BLE scanning |
+
+**Patterns & Fixes:**
+| Prompt | What it does |
+|--------|-------------|
+| `#ipc-patterns` | Semaphore guard, shared memory, ring buffer IPC for dual-core |
+| `#retarget-io-fix` | Fix printf not working on PSOC Edge (retarget-io init wrapper) |
+| `#radar-dsp` | Radar FFT pipeline, MTI filter, CM55 Helium/MVE SIMD acceleration |
+
+**Build & Configuration:**
+| Prompt | What it does |
+|--------|-------------|
+| `#build-error` | Diagnose build failures — common MTB root causes and fixes |
+| `#add-library` | Add a library dependency with correct .mtb entry, COMPONENTS, DEFINES |
+| `#device-configurator-spec` | Generate a Device Configurator setup specification |
+
+**Documentation:**
+| Prompt | What it does |
+|--------|-------------|
+| `#readme` | Generate a project README from code analysis + CONTEXT.md |
 
 > If `#` does not surface the prompt files in your VS Code version, open the relevant file from `.github/copilot/` and paste it into the chat window directly.
 
@@ -101,12 +135,13 @@ Once installed, Copilot understands:
 |-------|---------|
 | **Project structure** | 3-project layout for PSOC Edge (cm33_s / cm33_ns / cm55); single-project for all other families |
 | **HAL per device** | `mtb_hal_` for PSOC Edge and Control; `cyhal_` for PSOC 6, PSOC 4, XMC7000; `XMC_` (XMCLib) for XMC1000/4000 |
-| **HAL repos** | Correct source repo per device — DSL repos for PSOC Edge, `mtb-hal-psc3` for Control, `mtb-hal-cat1/cat2` for PSOC 6/4 |
-| **Library dependencies** | `deps/*.mtb` format, `make getlibs`, where to find COMPONENTS/DEFINES in each library's GitHub README |
+| **Dual-core patterns** | Boot sync, IPC message queue, shared memory, ring buffer, retarget-io fix |
+| **Connectivity** | WiFi STA, MQTT publish/subscribe, TLS, BLE GATT server, BLE scanning |
+| **Radar DSP** | Range FFT, Doppler FFT, MTI filter, CM55 Helium/MVE acceleration |
+| **Library dependencies** | `deps/*.mtb` format, dependency chains, COMPONENTS/DEFINES configuration |
 | **Build system** | `make build`, `make getlibs`, `make program`; TOOLCHAIN options (GCC_ARM, ARM, LLVM) |
-| **Device Configurator** | What cannot be generated automatically; how to specify peripheral configuration for the IDE GUI |
 | **Code standards** | Doxygen file headers, include guards, error handling patterns |
-| **Naming rules** | PSOC always ALL CAPS — never "PSoC" |
+| **Reference docs** | Deep-dive guides in `reference/` — porting, middleware compatibility, build patterns |
 
 ---
 
@@ -151,7 +186,7 @@ These rules are applied every session on top of the standard MTB rules.
 The template files are designed to be committed alongside your project code:
 
 ```
-git add .github/ CONTEXT.md memories/
+git add .github/ CONTEXT.md reference/ memories/
 git commit -m "Add MTB Copilot workspace template"
 ```
 
