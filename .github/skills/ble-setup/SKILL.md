@@ -17,10 +17,10 @@ Patterns for adding Bluetooth Low Energy (BLE) to ModusToolbox™ projects using
 Add to `deps/` (or `proj_cm33_ns/deps/` for PSOC Edge):
 
 ```
-mtb://btstack-integration#latest-v5.X#$$ASSET_REPO$$/btstack-integration/latest-v5.X
-mtb://bluetooth-freertos#latest-v5.X#$$ASSET_REPO$$/bluetooth-freertos/latest-v5.X
-mtb://freertos#latest-v10.X#$$ASSET_REPO$$/freertos/latest-v10.X
-mtb://retarget-io#latest-v1.X#$$ASSET_REPO$$/retarget-io/latest-v1.X
+https://github.com/Infineon/btstack-integration#latest-v5.X#$$ASSET_REPO$$/btstack-integration/latest-v5.X
+https://github.com/Infineon/bluetooth-freertos#latest-v5.X#$$ASSET_REPO$$/bluetooth-freertos/latest-v5.X
+https://github.com/Infineon/freertos#latest-v10.X#$$ASSET_REPO$$/freertos/latest-v10.X
+https://github.com/cypresssemiconductorco/retarget-io#latest-v1.X#$$ASSET_REPO$$/retarget-io/latest-v1.X
 ```
 
 ## Required Makefile Configuration

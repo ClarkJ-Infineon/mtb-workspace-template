@@ -17,13 +17,13 @@ Patterns for adding WiFi STA connectivity and MQTT publish/subscribe to ModusToo
 Add these `.mtb` files to `deps/` (or `proj_cm33_ns/deps/` for PSOC Edge):
 
 ```
-mtb://wifi-connection-manager#latest-v3.X#$$ASSET_REPO$$/wifi-connection-manager/latest-v3.X
-mtb://mqtt#latest-v4.X#$$ASSET_REPO$$/mqtt/latest-v4.X
-mtb://secure-sockets#latest-v3.X#$$ASSET_REPO$$/secure-sockets/latest-v3.X
-mtb://lwip#latest-v2.X#$$ASSET_REPO$$/lwip/latest-v2.X
-mtb://mbedtls#latest-v3.X#$$ASSET_REPO$$/mbedtls/latest-v3.X
-mtb://freertos#latest-v10.X#$$ASSET_REPO$$/freertos/latest-v10.X
-mtb://retarget-io#latest-v1.X#$$ASSET_REPO$$/retarget-io/latest-v1.X
+https://github.com/Infineon/wifi-connection-manager#latest-v3.X#$$ASSET_REPO$$/wifi-connection-manager/latest-v3.X
+https://github.com/Infineon/mqtt#latest-v4.X#$$ASSET_REPO$$/mqtt/latest-v4.X
+https://github.com/Infineon/secure-sockets#latest-v3.X#$$ASSET_REPO$$/secure-sockets/latest-v3.X
+https://github.com/Infineon/lwip#latest-v2.X#$$ASSET_REPO$$/lwip/latest-v2.X
+https://github.com/Infineon/mbedtls#latest-v3.X#$$ASSET_REPO$$/mbedtls/latest-v3.X
+https://github.com/Infineon/freertos#latest-v10.X#$$ASSET_REPO$$/freertos/latest-v10.X
+https://github.com/cypresssemiconductorco/retarget-io#latest-v1.X#$$ASSET_REPO$$/retarget-io/latest-v1.X
 ```
 
 Run `make getlibs` after adding.
