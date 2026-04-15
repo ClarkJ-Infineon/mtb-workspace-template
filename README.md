@@ -6,15 +6,15 @@ Works with **GitHub Copilot Chat in VS Code**, **GitHub Copilot Workspace**, and
 
 **Supported device families:** PSOC Edge · PSOC Control C3 · PSOC 6 · PSOC 4 · XMC1000/4000 · XMC7000
 
-### Toolchain Support
+### Copilot Customization Formats
 
-| Tool | Format | Location |
-|------|--------|----------|
-| **Copilot Chat (VS Code)** | Prompt files | `.github/copilot/*.prompt.md` |
-| **Copilot Workspace (browser)** | Skills | `.github/skills/*/SKILL.md` |
-| **Copilot CLI (terminal)** | Agents | `.github/agents/*.agent.md` |
+| Format | Location | Supported Tools | Invocation |
+|--------|----------|-----------------|------------|
+| **Custom Instructions** | `.github/copilot-instructions.md` | All (auto-loaded) | Automatic — loaded every session |
+| **Skills** ([open standard](https://agentskills.io)) | `.github/skills/*/SKILL.md` | VS Code Chat · Copilot CLI · Cloud Agent | Type `/skill-name` in chat |
+| **Agents** | `.github/agents/*.agent.md` | VS Code Chat · Copilot CLI · Cloud Agent | Agent picker dropdown or auto-loaded |
 
-All three formats share the same MTB knowledge — use whichever tool fits your workflow.
+Skills are the primary invocable content — each skill is a self-contained knowledge module that loads on-demand when relevant. Agents provide broader persistent personas for autonomous multi-step tasks.
 
 ---
 
@@ -51,18 +51,18 @@ memories/         → your-mtb-project/memories/
 ```
 
 The `.github/` folder includes:
-- `copilot-instructions.md` — system instructions (loaded automatically)
-- `copilot/` — prompt files for VS Code Copilot Chat
-- `skills/` — skills for Copilot Workspace
-- `agents/` — agents for Copilot CLI
+- `copilot-instructions.md` — system instructions (loaded automatically every session)
+- `skills/` — skills for VS Code Chat, Copilot CLI, and Cloud Agent (invoked via `/skill-name`)
+- `agents/` — capability agents for autonomous multi-step tasks
 
 > **Do NOT copy** `README.md`, `README-TEMPLATE.md`, or `LICENSE` — these are about the template itself, not your project.
 >
-> **For your project README:** Copy `README-TEMPLATE.md` to your project root, rename it to `README.md`, and fill in the sections. Or use `#readme` in Copilot Chat to generate one from your code.
+> **For your project README:** Copy `README-TEMPLATE.md` to your project root, rename it to `README.md`, and fill in the sections. Or use `/readme` in Copilot Chat to generate one from your code.
 
 > **If your project already has a `.github/` folder** (e.g., with GitHub Actions workflows), copy the contents rather than replacing the folder:
 > - Copy `.github/copilot-instructions.md` into your existing `.github/`
-> - Copy the `.github/copilot/` subfolder into your existing `.github/`
+> - Copy the `.github/skills/` subfolder into your existing `.github/`
+> - Copy the `.github/agents/` subfolder into your existing `.github/`
 
 ### Step 3 — Fill in CONTEXT.md
 
@@ -96,60 +96,60 @@ That's it. Open the project in VS Code — Copilot now has full MTB context.
 
 #file:CONTEXT.md  What project structure should I use for this PSOC Edge application?
 
-#file:CONTEXT.md  #build-error  [paste your build output here]
+#file:CONTEXT.md  /build-error  [paste your build output here]
 ```
 
-### Available prompts
+### Available skills
 
-Type `#` in Copilot Chat to invoke the included prompt files. Use `#mtb-help` to see the full catalog with descriptions.
+Type `/` in Copilot Chat to see available skills. Use `/mtb-help` for the full catalog with descriptions.
 
 **Discovery:**
-| Prompt | What it does |
-|--------|-------------|
-| `#mtb-help` | Full catalog of all available prompts with descriptions and usage examples |
+| Skill | What it does |
+|-------|-------------|
+| `/mtb-help` | Full catalog of all available skills with descriptions and usage examples |
 
 **Project Setup:**
-| Prompt | What it does |
-|--------|-------------|
-| `#dual-core-setup` | Configure PSOC Edge for active CM55: boot handshake, IPC init, project structure |
-| `#new-module` | Scaffold a new `.c`/`.h` source module with correct Doxygen file headers |
+| Skill | What it does |
+|-------|-------------|
+| `/dual-core-setup` | Configure PSOC Edge for active CM55: boot handshake, IPC init, project structure |
+| `/new-module` | Scaffold a new `.c`/`.h` source module with correct Doxygen file headers |
 
 **Connectivity:**
-| Prompt | What it does |
-|--------|-------------|
-| `#wifi-mqtt` | WiFi STA connection, MQTT publish/subscribe, TLS configuration, reconnection |
-| `#http-client` | HTTP GET via cy_secure_sockets, JSON parsing with coreJSON, polling patterns |
-| `#ble-setup` | BTSTACK v4 API patterns, GATT service definition, BLE scanning |
+| Skill | What it does |
+|-------|-------------|
+| `/wifi-mqtt` | WiFi STA connection, MQTT publish/subscribe, TLS configuration, reconnection |
+| `/http-client` | HTTP GET via cy_secure_sockets, JSON parsing with coreJSON, polling patterns |
+| `/ble-setup` | BTSTACK v4 API patterns, GATT service definition, BLE scanning |
 
 **Patterns & Fixes:**
-| Prompt | What it does |
-|--------|-------------|
-| `#ipc-patterns` | Semaphore guard, shared memory, ring buffer IPC for dual-core |
-| `#transparent-printf` | Cross-core printf via shared-memory ring buffer and `--wrap=_write` |
-| `#retarget-io-fix` | Fix printf not working on PSOC Edge (retarget-io init wrapper) |
-| `#radar-dsp` | Radar FFT pipeline, MTI filter, CM55 Helium/MVE SIMD acceleration |
-| `#lvgl-setup` | LVGL v9 graphics with VG-Lite GPU, GFXSS personality, display drivers |
+| Skill | What it does |
+|-------|-------------|
+| `/ipc-patterns` | Semaphore guard, shared memory, ring buffer IPC for dual-core |
+| `/transparent-printf` | Cross-core printf via shared-memory ring buffer and `--wrap=_write` |
+| `/retarget-io-fix` | Fix printf not working on PSOC Edge (retarget-io init wrapper) |
+| `/radar-dsp` | Radar FFT pipeline, MTI filter, CM55 Helium/MVE SIMD acceleration |
+| `/lvgl-setup` | LVGL v9 graphics with VG-Lite GPU, GFXSS personality, display drivers |
 
 **Build & Configuration:**
-| Prompt | What it does |
-|--------|-------------|
-| `#build-error` | Diagnose build failures — common MTB root causes and fixes |
-| `#add-library` | Add a library dependency with correct .mtb entry, COMPONENTS, DEFINES |
-| `#device-configurator-spec` | Generate a Device Configurator setup specification |
-| `#openocd-debug` | OpenOCD/GDB debugging, multi-core debug, CFSR fault analysis |
+| Skill | What it does |
+|-------|-------------|
+| `/build-error` | Diagnose build failures — common MTB root causes and fixes |
+| `/add-library` | Add a library dependency with correct .mtb entry, COMPONENTS, DEFINES |
+| `/device-configurator-spec` | Generate a Device Configurator setup specification |
+| `/openocd-debug` | OpenOCD/GDB debugging, multi-core debug, CFSR fault analysis |
 
 **Documentation:**
-| Prompt | What it does |
-|--------|-------------|
-| `#readme` | Generate a project README from code analysis + CONTEXT.md |
+| Skill | What it does |
+|-------|-------------|
+| `/readme` | Generate a project README from code analysis + CONTEXT.md |
 
-> If `#` does not surface the prompt files in your VS Code version, open the relevant file from `.github/copilot/` and paste it into the chat window directly.
+> Skills are also auto-loaded by Copilot based on relevance — you don't always need to invoke them explicitly.
 
 ---
 
 ## Using with Copilot CLI
 
-If you use [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) (terminal-based), the template includes **5 consolidated agents** in `.github/agents/`. These are broader than the VS Code prompts — each agent covers a full capability domain and can handle tasks autonomously.
+If you use [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) (terminal-based), the template includes **5 consolidated agents** in `.github/agents/`. These are broader than individual skills — each agent covers a full capability domain and can handle multi-step tasks autonomously. Skills are also available to CLI users.
 
 | Agent | Scope |
 |-------|-------|
@@ -236,6 +236,12 @@ The `memories/session/current.md` file is a session state placeholder — update
 
 | Resource | URL |
 |----------|-----|
+| **Copilot Customization Overview** | https://code.visualstudio.com/docs/copilot/copilot-customization |
+| **Agent Skills (open standard)** | https://code.visualstudio.com/docs/copilot/customization/agent-skills |
+| **Custom Agents** | https://code.visualstudio.com/docs/copilot/customization/custom-agents |
+| **Prompt Files** | https://code.visualstudio.com/docs/copilot/customization/prompt-files |
+| **Agent Skills Specification** | https://agentskills.io |
+| **Community Examples** | https://github.com/github/awesome-copilot |
 | ModusToolbox™ library index (all device families) | https://github.com/Infineon/modustoolbox-software/blob/master/README.md |
 | MTB PDL API Reference (CAT1/CAT1C — PSOC 6, Edge, Control) | https://infineon.github.io/mtb-pdl-cat1/pdl_api_reference_manual/html/ |
 | MTB PDL API Reference (CAT2 — PSOC 4) | https://infineon.github.io/mtb-pdl-cat2/pdl_api_reference_manual/html/ |
