@@ -2,9 +2,19 @@
 
 A GitHub Copilot context template for [ModusToolbox™](https://www.infineon.com/modustoolbox) application development. Drop these files into any ModusToolbox project to give GitHub Copilot detailed knowledge of Infineon device families, project structure, APIs, and development conventions.
 
-Works with **GitHub Copilot Chat in VS Code** and **GitHub Copilot CLI**.
+Works with **GitHub Copilot Chat in VS Code**, **GitHub Copilot Workspace**, and **GitHub Copilot CLI**.
 
 **Supported device families:** PSOC Edge · PSOC Control C3 · PSOC 6 · PSOC 4 · XMC1000/4000 · XMC7000
+
+### Toolchain Support
+
+| Tool | Format | Location |
+|------|--------|----------|
+| **Copilot Chat (VS Code)** | Prompt files | `.github/copilot/*.prompt.md` |
+| **Copilot Workspace (browser)** | Skills | `.github/skills/*/SKILL.md` |
+| **Copilot CLI (terminal)** | Agents | `.github/agents/*.agent.md` |
+
+All three formats share the same MTB knowledge — use whichever tool fits your workflow.
 
 ---
 
@@ -39,6 +49,12 @@ CONTEXT.md        → your-mtb-project/CONTEXT.md
 reference/        → your-mtb-project/reference/
 memories/         → your-mtb-project/memories/
 ```
+
+The `.github/` folder includes:
+- `copilot-instructions.md` — system instructions (loaded automatically)
+- `copilot/` — prompt files for VS Code Copilot Chat
+- `skills/` — skills for Copilot Workspace
+- `agents/` — agents for Copilot CLI
 
 > **Do NOT copy** `README.md`, `README-TEMPLATE.md`, or `LICENSE` — these are about the template itself, not your project.
 >
@@ -102,14 +118,17 @@ Type `#` in Copilot Chat to invoke the included prompt files. Use `#mtb-help` to
 | Prompt | What it does |
 |--------|-------------|
 | `#wifi-mqtt` | WiFi STA connection, MQTT publish/subscribe, TLS configuration, reconnection |
+| `#http-client` | HTTP GET via cy_secure_sockets, JSON parsing with coreJSON, polling patterns |
 | `#ble-setup` | BTSTACK v4 API patterns, GATT service definition, BLE scanning |
 
 **Patterns & Fixes:**
 | Prompt | What it does |
 |--------|-------------|
 | `#ipc-patterns` | Semaphore guard, shared memory, ring buffer IPC for dual-core |
+| `#transparent-printf` | Cross-core printf via shared-memory ring buffer and `--wrap=_write` |
 | `#retarget-io-fix` | Fix printf not working on PSOC Edge (retarget-io init wrapper) |
 | `#radar-dsp` | Radar FFT pipeline, MTI filter, CM55 Helium/MVE SIMD acceleration |
+| `#lvgl-setup` | LVGL v9 graphics with VG-Lite GPU, GFXSS personality, display drivers |
 
 **Build & Configuration:**
 | Prompt | What it does |
@@ -117,6 +136,7 @@ Type `#` in Copilot Chat to invoke the included prompt files. Use `#mtb-help` to
 | `#build-error` | Diagnose build failures — common MTB root causes and fixes |
 | `#add-library` | Add a library dependency with correct .mtb entry, COMPONENTS, DEFINES |
 | `#device-configurator-spec` | Generate a Device Configurator setup specification |
+| `#openocd-debug` | OpenOCD/GDB debugging, multi-core debug, CFSR fault analysis |
 
 **Documentation:**
 | Prompt | What it does |
@@ -124,6 +144,22 @@ Type `#` in Copilot Chat to invoke the included prompt files. Use `#mtb-help` to
 | `#readme` | Generate a project README from code analysis + CONTEXT.md |
 
 > If `#` does not surface the prompt files in your VS Code version, open the relevant file from `.github/copilot/` and paste it into the chat window directly.
+
+---
+
+## Using with Copilot CLI
+
+If you use [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) (terminal-based), the template includes **5 consolidated agents** in `.github/agents/`. These are broader than the VS Code prompts — each agent covers a full capability domain and can handle tasks autonomously.
+
+| Agent | Scope |
+|-------|-------|
+| `mtb-project` | Project creation via `project-creator-cli`, library dependency management (`.mtb` files), Makefile configuration |
+| `mtb-connectivity` | WiFi STA, MQTT pub/sub, HTTP client, TLS, JSON parsing, reconnection strategies |
+| `mtb-multicore` | CM55 activation, boot synchronization, IPC (shared memory, message queue, ring buffer), cross-core printf |
+| `mtb-display` | LVGL v9 graphics, VG-Lite GPU acceleration, GFXSS personality, display/touch drivers |
+| `mtb-diagnostics` | Build error diagnosis, printf fix, OpenOCD/GDB debugging, CFSR fault analysis |
+
+Agents are loaded automatically when relevant to your task. The `copilot-instructions.md` file provides shared context for both VS Code and CLI sessions.
 
 ---
 
@@ -136,8 +172,10 @@ Once installed, Copilot understands:
 | **Project structure** | 3-project layout for PSOC Edge (cm33_s / cm33_ns / cm55); single-project for all other families |
 | **HAL per device** | `mtb_hal_` for PSOC Edge and Control; `cyhal_` for PSOC 6, PSOC 4, XMC7000; `XMC_` (XMCLib) for XMC1000/4000 |
 | **Dual-core patterns** | Boot sync, IPC message queue, shared memory, ring buffer, retarget-io fix |
-| **Connectivity** | WiFi STA, MQTT publish/subscribe, TLS, BLE GATT server, BLE scanning |
+| **Connectivity** | WiFi STA, MQTT publish/subscribe, HTTP client, TLS, BLE GATT server, BLE scanning |
 | **Radar DSP** | Range FFT, Doppler FFT, MTI filter, CM55 Helium/MVE acceleration |
+| **Graphics** | LVGL v9 with VG-Lite GPU, GFXSS personality, display/touch drivers, framebuffer management |
+| **Debugging** | OpenOCD/GDB multi-core debug, CFSR fault register analysis, PPU violations |
 | **Library dependencies** | `deps/*.mtb` format, dependency chains, COMPONENTS/DEFINES configuration |
 | **Build system** | `make build`, `make getlibs`, `make program`; TOOLCHAIN options (GCC_ARM, ARM, LLVM) |
 | **Code standards** | Doxygen file headers, include guards, error handling patterns |
