@@ -1,5 +1,6 @@
 ---
-description: "Diagnose a ModusToolbox build failure — checks for common MTB-specific root causes before suggesting fixes"
+name: build-error
+description: Diagnose ModusToolbox build failures by checking common MTB-specific root causes. Use this when a build fails, compiler or linker errors appear, undefined symbol errors occur, or when the user shares a build error message.
 ---
 
 Diagnose the ModusToolbox™ build error provided. Work through the checklist below in order — most MTB build failures fall into one of these categories.
@@ -54,6 +55,11 @@ Read `CONTEXT.md` first to confirm the target device family, kit, and toolchain 
 **Symptoms:** Errors only with one TOOLCHAIN (GCC_ARM, ARM, LLVM).
 **Check:** Does the code use compiler-specific intrinsics or attributes without an `#ifdef` guard?
 **Fix:** Add appropriate guards (e.g., `#if defined(__ARM_FEATURE_MVE)` for Helium intrinsics).
+
+### 9. Project not created via project-creator-cli
+**Symptoms:** Multiple undefined symbols for BSP types (`GFXSS_Type`, `CYBSP_*`), missing `$(SEARCH_*)` variables, linker script errors.
+**Check:** Was the project created via `project-creator-cli` or was it manually assembled?
+**Fix:** Use the /project-creation skill to create the project correctly. Manual project assembly is not a supported workflow.
 
 ---
 

@@ -1,5 +1,6 @@
 ---
-description: "Generate a Device Configurator setup specification for a peripheral — tells the developer exactly what to configure in the MTB IDE"
+name: device-configurator-spec
+description: Generate a Device Configurator setup specification for a peripheral in the ModusToolbox IDE. Use when configuring peripherals in design.modus, setting up I2C/SPI/UART/GPIO/Timer hardware, or documenting Device Configurator settings.
 ---
 
 Generate a Device Configurator configuration specification for the requested peripheral. Copilot cannot create `.cycfg` files directly — the developer must apply this specification in the ModusToolbox™ IDE Device Configurator GUI.

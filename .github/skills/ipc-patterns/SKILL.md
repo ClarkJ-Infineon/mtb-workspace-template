@@ -1,8 +1,13 @@
+---
+name: ipc-patterns
+description: Inter-processor communication patterns for PSOC Edge E84 dual-core projects. Use when implementing shared memory, message queues, ring buffers, or any data exchange between CM33 and CM55 cores.
+---
+
 # IPC Communication Patterns — PSOC Edge Dual-Core
 
 Inter-processor communication patterns for PSOC Edge E84 (CM33 + CM55).
 
-> **Prerequisites:** Read `CONTEXT.md`. For initial IPC setup and boot sync, use `#dual-core-setup` first.
+> **Prerequisites:** Read `CONTEXT.md`. For initial IPC setup and boot sync, use the /dual-core-setup skill first.
 
 ---
 
@@ -221,4 +226,4 @@ bool ring_read(ring_entry_t *entry)
 | State changes, commands | IPC Message Queue | Low (8 msg buffer) | Low |
 | Periodic sensor readings | Semaphore-Guarded Shared Mem | Medium | Medium |
 | Streaming data (radar, audio) | Ring Buffer | High | Higher |
-| One-time boot synchronization | IPC Boot Handshake (`#dual-core-setup`) | N/A | Low |
+| One-time boot synchronization | IPC Boot Handshake (see /dual-core-setup skill) | N/A | Low |

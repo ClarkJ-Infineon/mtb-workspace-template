@@ -1,8 +1,14 @@
+---
+name: ble-setup
+description: Add Bluetooth Low Energy using BTSTACK v4 API to ModusToolbox projects with AIROC combo chips. Use when adding BLE, Bluetooth, GATT services, advertising, scanning, or BLE peripheral/central functionality.
+---
+
 # BLE Setup — BTSTACK v4 Patterns
 
 Patterns for adding Bluetooth Low Energy (BLE) to ModusToolbox™ projects using the AIROC BTSTACK v4 API.
 
 > **Applies to:** PSOC Edge, PSOC 6 with AIROC CYW43xxx/CYW55xxx combo chips.
+> **Prerequisites:** Project must have been created via `project-creator-cli` (see /project-creation skill).
 
 ---
 

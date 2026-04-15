@@ -1,8 +1,13 @@
+---
+name: readme
+description: Generate a publication-ready README.md following the standard Infineon code example format. Use when creating or updating the project README, or when the user asks for project documentation.
+---
+
 # Generate Project README
 
 Generate a complete, publication-ready README.md for this ModusToolbox™ project.
 
-> **Prerequisites:** Attach `CONTEXT.md` and ensure your project has source code to analyze.
+> **Prerequisites:** Read `CONTEXT.md` and ensure your project has source code to analyze.
 
 ---
 

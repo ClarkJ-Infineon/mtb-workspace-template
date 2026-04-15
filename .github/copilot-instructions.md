@@ -35,7 +35,7 @@ Additional detection signals:
 
 If auto-detection fails and `CONTEXT.md` is empty, **ask the user** before generating any code.
 
-> **Tip:** Type `#mtb-help` in Copilot Chat to see all available pattern prompts and workflows.
+> **Tip:** Use `/mtb-help` to see all available skills and workflows. Skills are loaded automatically when relevant, or invoke with `/skill-name`.
 
 ---
 
@@ -95,8 +95,8 @@ Each sub-project maps to a distinct execution domain. All three can contain appl
 > **Note:** Many Infineon code examples place all application logic in `proj_cm33_ns/` with CM55 in deep sleep. This is a starting point — real applications should distribute work across domains based on security, performance, and power requirements.
 
 **PSOC Edge gotchas:**
-- **retarget-io** requires an init wrapper on PSOC Edge  `cy_retarget_io_init()` alone is not sufficient. Use `#retarget-io-fix` for the validated pattern.
-- **Boot sync**  CM33 must call `mtb_ipc_init()` and enable CM55 before CM55 calls `mtb_ipc_get_handle()`. A null handle causes silent HardFault. Use `#dual-core-setup` for the boot handshake pattern.
+- **retarget-io** requires an init wrapper on PSOC Edge  `cy_retarget_io_init()` alone is not sufficient. Use the /retarget-io-fix skill for the validated pattern.
+- **Boot sync**  CM33 must call `mtb_ipc_init()` and enable CM55 before CM55 calls `mtb_ipc_get_handle()`. A null handle causes silent HardFault. Use the /dual-core-setup skill for the boot handshake pattern.
 - **CM55 FreeRTOS**  If using FreeRTOS on CM55 with Helium/MVE, add `configENABLE_MVE=1` to `FreeRTOSConfig.h` or FreeRTOS will not save MVE registers on context switch, causing silent data corruption.
 - **Shared memory**  IPC buffers must use `CY_SECTION_SHAREDMEM` attribute and align to 32 bytes (DCache line size). Unaligned buffers cause sporadic data corruption.
 
@@ -156,24 +156,25 @@ Each sub-project maps to a distinct execution domain. All three can contain appl
 
 ---
 
-## Available Pattern Prompts
+## Available Skills
 
-When the developer seems unsure what assistance is available, suggest `#mtb-help`.
+When the developer seems unsure what assistance is available, suggest `/mtb-help`.
 
-| Need | Prompt | Description |
-|------|--------|-------------|
-| **Overview of all prompts** | `#mtb-help` | Full catalog with descriptions and usage examples |
-| Dual-core project setup | `#dual-core-setup` | Boot sync, IPC init, CM55 active DSP configuration |
-| IPC communication | `#ipc-patterns` | Semaphore guard, shared memory, ring buffer patterns |
-| WiFi + MQTT | `#wifi-mqtt` | Connection, publish/subscribe, TLS, error handling |
-| BLE peripheral/central | `#ble-setup` | BTSTACK v4 API, GATT service, scanning |
-| Printf not working | `#retarget-io-fix` | PSOC Edge retarget-io wrapper pattern |
-| Radar DSP pipeline | `#radar-dsp` | FFT, MTI filter, CM55 Helium/MVE acceleration |
-| Build errors | `#build-error` | Common Makefile, linker, config root causes |
-| Add middleware library | `#add-library` | Library manifest, COMPONENTS, DEFINES |
-| Device Configurator | `#device-configurator-spec` | Generate peripheral config spec for MTB IDE |
-| Create source module | `#new-module` | Scaffold .c/.h pair with correct headers |
-| Generate README | `#readme` | Create project README from code + CONTEXT.md |
+| Need | Skill | Description |
+|------|-------|-------------|
+| **Overview of all skills** | `/mtb-help` | Full catalog with descriptions and usage examples |
+| Project creation | `/project-creation` | Non-negotiable: always use project-creator-cli |
+| Dual-core project setup | `/dual-core-setup` | Boot sync, IPC init, CM55 active DSP configuration |
+| IPC communication | `/ipc-patterns` | Semaphore guard, shared memory, ring buffer patterns |
+| WiFi + MQTT | `/wifi-mqtt` | Connection, publish/subscribe, TLS, error handling |
+| BLE peripheral/central | `/ble-setup` | BTSTACK v4 API, GATT service, scanning |
+| Printf not working | `/retarget-io-fix` | PSOC Edge retarget-io wrapper pattern |
+| Radar DSP pipeline | `/radar-dsp` | FFT, MTI filter, CM55 Helium/MVE acceleration |
+| Build errors | `/build-error` | Common Makefile, linker, config root causes |
+| Add middleware library | `/add-library` | Library manifest, COMPONENTS, DEFINES |
+| Device Configurator | `/device-configurator-spec` | Generate peripheral config spec for MTB IDE |
+| Create source module | `/new-module` | Scaffold .c/.h pair with correct headers |
+| Generate README | `/readme` | Create project README from code + CONTEXT.md |
 
 ---
 
@@ -196,11 +197,12 @@ make build TOOLCHAIN=LLVM      # LLVM/Clang
 
 **VS Code Copilot Chat:**
 - Start each session: attach `CONTEXT.md` in your first message (`#file:CONTEXT.md`)
-- Invoke prompts: type `#` in chat and select from available prompt files
-- If `#` invocation is unavailable, open the `.prompt.md` file from `.github/copilot/` and paste into chat
+- Skills load automatically when relevant, or invoke with `/skill-name`
+- Use `/skills list` to see all available skills
 
 **Copilot CLI:**
 - Start: `#pickup`  read session state  confirm before starting
+- Skills are auto-detected based on task context
 - End: `#handoff`  commit + push all modified files
 
 ---

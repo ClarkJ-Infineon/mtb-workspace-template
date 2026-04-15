@@ -1,3 +1,8 @@
+---
+name: retarget-io-fix
+description: Fix printf not producing output on PSOC Edge E84 devices. Use when serial output is missing, printf produces no output, retarget-io initialization fails, or CM55 needs printf access on PSOC Edge.
+---
+
 # Retarget-IO Fix — PSOC Edge Printf Wrapper
 
 Fix for `printf()` not producing output on PSOC Edge E84 devices.
@@ -85,7 +90,9 @@ Each core prefixes its printf with a tag. Output still interleaves but is readab
 
 ### Option B: IPC-routed logging (advanced)
 
-CM55 sends log messages via IPC to CM33, which serializes all output through a single printf task. Higher complexity, but output never interleaves. See `#ipc-patterns` for the message queue pattern.
+CM55 sends log messages via IPC to CM33, which serializes all output through a single printf task. Higher complexity, but output never interleaves. See the /ipc-patterns skill for the message queue pattern.
+
+> **Important:** CM55 cannot directly access the UART (SCB2) on PSOC Edge — the Protection Policy Unit (PPU) blocks it. CM55 printf **must** use an IPC relay to CM33. This is a hardware-enforced restriction, not a software bug.
 
 ---
 

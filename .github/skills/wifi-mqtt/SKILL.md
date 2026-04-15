@@ -1,8 +1,14 @@
+---
+name: wifi-mqtt
+description: Add WiFi STA connectivity and MQTT publish/subscribe to ModusToolbox projects. Use when adding WiFi, MQTT, network connectivity, cloud communication, or IoT telemetry publishing to a project.
+---
+
 # WiFi + MQTT — Connection, Publish, TLS
 
 Patterns for adding WiFi STA connectivity and MQTT publish/subscribe to ModusToolbox™ projects.
 
 > **Applies to:** PSOC Edge (CM33 NS), PSOC 6, and any kit with CYW43xxx/CYW55xxx WiFi radio.
+> **Prerequisites:** Project must have been created via `project-creator-cli` (see /project-creation skill).
 
 ---
 

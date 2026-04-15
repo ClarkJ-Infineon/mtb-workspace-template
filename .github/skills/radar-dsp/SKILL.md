@@ -1,8 +1,14 @@
+---
+name: radar-dsp
+description: Radar DSP pipeline patterns using CM55 Helium/MVE SIMD acceleration for PSOC Edge E84. Use when building radar signal processing, range FFT, Doppler FFT, MTI filtering, presence detection, or any compute-intensive DSP on CM55.
+---
+
 # Radar DSP Pipeline — CM55 Helium/MVE Acceleration
 
 Patterns for building radar signal processing on PSOC Edge E84 using the Cortex-M55 with Arm Helium (MVE) SIMD.
 
 > **Applies to:** PSOC Edge E84 with BGT60TR13C 60 GHz radar sensor (KIT_PSE84_AI).
+> **Prerequisites:** Use /dual-core-setup skill first for CM55 project configuration. Use /ipc-patterns skill for CM55→CM33 communication.
 
 ---
 
@@ -16,7 +22,7 @@ BGT60TR13C → SPI → CM55 DSP Pipeline → IPC → CM33 → WiFi/MQTT
                     └── Detection Logic
 ```
 
-The CM55 handles all compute-intensive DSP at ~10 Hz frame rate. Detection results (state changes) are sent to CM33 via IPC for network publishing. See `#dual-core-setup` for the CM55 project configuration and `#ipc-patterns` for communication.
+The CM55 handles all compute-intensive DSP at ~10 Hz frame rate. Detection results (state changes) are sent to CM33 via IPC for network publishing.
 
 ---
 

@@ -1,5 +1,6 @@
 ---
-description: "Scaffold a new .c/.h module pair with correct Doxygen file headers for the target device"
+name: new-module
+description: Scaffold a new C source/header module pair with correct Doxygen file headers and include guards. Use when creating a new .c/.h file pair, adding a new source module, or scaffolding a new component for the project.
 ---
 
 Create a new source module (`.c` and `.h` file pair) for this project.
