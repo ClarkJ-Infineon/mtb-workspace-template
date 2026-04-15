@@ -1,4 +1,4 @@
-# ModusToolbox Prompt Catalog — v2
+# ModusToolbox Prompt Catalog — v3
 
 > This template includes specialized pattern prompts for common ModusToolbox development tasks. Each prompt is a self-contained recipe that you invoke by typing `#prompt-name` in Copilot Chat.
 
@@ -23,6 +23,7 @@
 ### 🚀 Project Setup
 | Prompt | When to use | What it does |
 |--------|------------|--------------|
+| `#project-creation` | **Always — before any new project** | Non-negotiable workflow rule: use `project-creator-cli`, choose the right template, build up capabilities via prompts |
 | `#dual-core-setup` | Starting a PSOC Edge project with active CM55 | Configures 3-project structure with boot handshake, IPC init, and CM55 application scaffolding |
 | `#new-module` | Adding a new source file pair | Scaffolds `.c`/`.h` pair with correct file headers, include guards, and Doxygen stubs |
 
