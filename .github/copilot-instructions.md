@@ -165,14 +165,18 @@ When the developer seems unsure what assistance is available, suggest `/mtb-help
 | **Overview of all skills** | `/mtb-help` | Full catalog with descriptions and usage examples |
 | Project creation | `/project-creation` | Non-negotiable: always use project-creator-cli |
 | Dual-core project setup | `/dual-core-setup` | Boot sync, IPC init, CM55 active DSP configuration |
+| LVGL touchscreen graphics | `/lvgl-setup` | GFXSS personality, display drivers, VG-Lite GPU, lv_conf.h |
 | IPC communication | `/ipc-patterns` | Semaphore guard, shared memory, ring buffer patterns |
+| Cross-core printf | `/transparent-printf` | Ring buffer IPC relay, `--wrap=_write`, drain task |
 | WiFi + MQTT | `/wifi-mqtt` | Connection, publish/subscribe, TLS, error handling |
+| HTTP client | `/http-client` | HTTP GET via cy_secure_sockets, JSON parsing, polling |
 | BLE peripheral/central | `/ble-setup` | BTSTACK v4 API, GATT service, scanning |
 | Printf not working | `/retarget-io-fix` | PSOC Edge retarget-io wrapper pattern |
 | Radar DSP pipeline | `/radar-dsp` | FFT, MTI filter, CM55 Helium/MVE acceleration |
 | Build errors | `/build-error` | Common Makefile, linker, config root causes |
 | Add middleware library | `/add-library` | Library manifest, COMPONENTS, DEFINES |
 | Device Configurator | `/device-configurator-spec` | Generate peripheral config spec for MTB IDE |
+| OpenOCD/GDB debugging | `/openocd-debug` | make debug/attach, multi-core GDB, CFSR analysis |
 | Create source module | `/new-module` | Scaffold .c/.h pair with correct headers |
 | Generate README | `/readme` | Create project README from code + CONTEXT.md |
 

@@ -107,9 +107,10 @@ Where this "build-up" path is **proven and documented**, use it with confidence.
 | Library addition | /add-library | ✅ Validated | .mtb format, COMPONENTS, DEFINES |
 | Retarget-io (printf) | /retarget-io-fix | ✅ Validated | PSOC Edge wrapper pattern |
 | IPC shared memory | /ipc-patterns | ⚠️ Needs update | Lock-free pattern from ce-weather-display not yet incorporated |
-| LVGL graphics | /lvgl-setup | 🔲 Not yet created | Draft exists in retrospectives |
-| HTTP client | /http-client | 🔲 Not yet created | Pattern validated in ce-weather-display |
-| CM55 transparent printf | /transparent-printf | 🔲 Not yet created | IPC relay pattern from ce-weather-display |
+| LVGL graphics | /lvgl-setup | ✅ Created | GFXSS, display drivers, VG-Lite, lv_conf.h, init sequence |
+| HTTP client | /http-client | ✅ Created | cy_secure_sockets, coreJSON, polling pattern |
+| CM55 transparent printf | /transparent-printf | ✅ Created | Ring buffer IPC relay, --wrap=_write, drain task |
+| OpenOCD/GDB debugging | /openocd-debug | ✅ Created | make debug/attach, multi-core, CFSR analysis |
 | Radar DSP | /radar-dsp | ✅ Validated | CM55 Helium/MVE, FFT pipelines |
 
 As skills are created and validated, the "start from closest template" advice becomes less necessary. The end state: **any developer (human or AI) can start from an empty app and compose capabilities via skills.**

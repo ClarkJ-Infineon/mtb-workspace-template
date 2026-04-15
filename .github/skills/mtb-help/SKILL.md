@@ -27,16 +27,23 @@ description: ModusToolbox skill catalog and getting started guide. Use when the 
 | `/dual-core-setup` | Starting a PSOC Edge project with active CM55 | Configures 3-project structure with boot handshake, IPC init, and CM55 application scaffolding |
 | `/new-module` | Adding a new source file pair | Scaffolds `.c`/`.h` pair with correct file headers, include guards, and Doxygen stubs |
 
+### 🖥️ Graphics
+| Skill | When it activates | What it does |
+|-------|-------------------|--------------|
+| `/lvgl-setup` | Adding LVGL touchscreen graphics to a PSOC Edge project | Complete LVGL v9 integration: GFXSS personality, display drivers, VG-Lite GPU, lv_conf.h, framebuffer layout, init sequence |
+
 ### 📡 Connectivity
 | Skill | When it activates | What it does |
 |-------|-------------------|--------------|
 | `/wifi-mqtt` | Adding WiFi + MQTT to your project | WiFi STA connection, MQTT publish/subscribe, TLS configuration, reconnection logic |
 | `/ble-setup` | Adding Bluetooth LE functionality | BTSTACK v4 API patterns, GATT service definition, BLE scanning, advertising |
+| `/http-client` | Adding HTTP GET/POST to fetch data from APIs | Plain HTTP and HTTPS via cy_secure_sockets, JSON parsing with coreJSON, periodic polling pattern |
 
 ### 🔧 Patterns & Fixes
 | Skill | When it activates | What it does |
 |-------|-------------------|--------------|
 | `/ipc-patterns` | Dual-core communication beyond boot sync | Semaphore-guarded shared memory, ring buffer IPC, message queue patterns |
+| `/transparent-printf` | Need printf from both cores on PSOC Edge | Cross-core printf via shared ring buffer, `--wrap=_write` linker hook, IPC-locked drain task |
 | `/retarget-io-fix` | Printf not working on PSOC Edge | Validated retarget-io init wrapper — `cy_retarget_io_init()` alone is insufficient on PSOC Edge |
 | `/radar-dsp` | Building a radar signal processing pipeline | Range FFT, Doppler FFT, MTI filter, CM55 Helium/MVE acceleration patterns |
 
@@ -46,6 +53,11 @@ description: ModusToolbox skill catalog and getting started guide. Use when the 
 | `/build-error` | Build fails and you're stuck | Diagnoses common Makefile, linker, config errors with root-cause lookup |
 | `/add-library` | Adding a middleware library | Library `.mtb` entry format, required COMPONENTS and DEFINES, dependency chains |
 | `/device-configurator-spec` | Need to document peripheral config | Generates Device Configurator specification for MTB IDE setup |
+
+### 🐛 Debugging
+| Skill | When it activates | What it does |
+|-------|-------------------|--------------|
+| `/openocd-debug` | Need to debug firmware with GDB/OpenOCD | make debug/attach workflow, multi-core attach, CFSR fault analysis, VS Code launch setup |
 
 ### 📄 Documentation
 | Skill | When it activates | What it does |
