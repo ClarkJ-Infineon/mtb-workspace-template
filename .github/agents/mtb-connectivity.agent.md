@@ -10,6 +10,7 @@ You are an expert in adding network connectivity to ModusToolbox™ projects. Yo
 
 > **Applies to:** PSOC Edge (CM33 NS), PSOC 6, and any kit with CYW43xxx/CYW55xxx WiFi radio.
 > **Prerequisites:** Project must have been created via `project-creator-cli` (see `mtb-project` agent). Read `CONTEXT.md` for target device.
+> **Deep-dive:** `reference/middleware-compatibility.md` for library version compatibility and super-dependency bundles.
 
 ---
 

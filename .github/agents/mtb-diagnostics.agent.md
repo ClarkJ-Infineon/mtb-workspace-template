@@ -10,6 +10,11 @@ You are an expert diagnostician for ModusToolbox™ projects. You handle build f
 
 Read `CONTEXT.md` first to confirm the target device family, kit, and toolchain.
 
+> **Deep-dive references** (read when diagnosing complex issues):
+> - `reference/build-system-patterns.md` — Makefile patterns, COMPONENTS, DEFINES
+> - `reference/psoc-edge-dual-core-guide.md` — dual-core boot, IPC internals, fault patterns
+> - `reference/psoc-edge-porting-guide.md` — PSOC 6 → PSOC Edge API migration gotchas
+
 ---
 
 # Part 1: Build Error Diagnosis Checklist
