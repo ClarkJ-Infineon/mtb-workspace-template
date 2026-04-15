@@ -161,6 +161,6 @@ If you are an AI coding agent working on a ModusToolbox™ project:
 
 | Resource | Location |
 |---|---|
-| Project Creator CLI docs | `ModusToolbox/tools_3.7/docs/project-creator-cli.html` |
+| Project Creator CLI docs | `ModusToolbox/tools_<version>/docs/project-creator-cli.html` (check CONTEXT.md for version) |
 | Available templates | `project-creator-cli --list-apps` |
 | Available boards | `project-creator-cli --list-boards` |
