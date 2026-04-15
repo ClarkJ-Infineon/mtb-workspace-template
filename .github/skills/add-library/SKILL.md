@@ -24,9 +24,14 @@ Add a new ModusToolbox™ library to this project. Follow these steps exactly:
 
 5. **Create the `.mtb` dependency file**:
    ```
-   mtb://[library-name]#latest-vX.X#$$ASSET_REPO$$/[library-name]/latest-vX.X
+   https://github.com/Infineon/[library-name]#latest-vX.X#$$ASSET_REPO$$/[library-name]/latest-vX.X
    ```
    File name: `[library-name].mtb` in the correct `deps/` directory.
+
+   **URL format:**
+   - `https://github.com/Infineon/[name]` — standard for Infineon libraries (matches Project Creator output)
+   - `https://github.com/[org]/[name]` — for third-party libraries (e.g., `https://github.com/lvgl/lvgl`)
+   - `mtb://[name]` — manifest-redirected scheme; only works for libraries registered in the ModusToolbox manifest. Enables automatic mirror selection (public GitHub, China mirror, internal EAP). Only use when you know the library is manifest-registered.
 
    **Version tag conventions:**
    - `latest-vX.X` — latest patch within major.minor (recommended)
