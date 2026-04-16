@@ -1,113 +1,153 @@
 ---
 name: retarget-io-fix
-description: Fix printf not producing output on PSOC Edge E84 devices. Use when serial output is missing, printf produces no output, retarget-io initialization fails, or CM55 needs printf access on PSOC Edge.
+description: Fix printf not producing output on PSOC Edge E84 devices. Covers the correct PDL→HAL→retarget-io initialization sequence for CM33 and CM55 cores. Use when serial output is missing or retarget-io initialization fails on PSOC Edge.
 ---
 
-# Retarget-IO Fix — PSOC Edge Printf Wrapper
+# Retarget-IO on PSOC Edge E84 — Correct Initialization
 
-Fix for `printf()` not producing output on PSOC Edge E84 devices.
+How to get `printf()` working on PSOC Edge E84 devices (CM33 and CM55 cores).
 
-> **Applies to:** PSOC Edge E84 only. PSOC 6 and other families work with standard `cy_retarget_io_init()`.
+> **Applies to:** PSOC Edge E84 only. PSOC 6 and PSOC Control use a simpler `cy_retarget_io_init()` signature that takes HW/TX/RX/baud directly.
 
 ---
 
 ## The Problem
 
-On PSOC Edge, calling `cy_retarget_io_init(CYBSP_DEBUG_UART_HW, CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, 115200)` alone does **not** enable printf output. The function returns `CY_RSLT_SUCCESS` but no characters appear on the terminal.
+On PSOC Edge, calling the PSOC 6-style `cy_retarget_io_init(HW, TX, RX, baud)` does **not** produce printf output. The function may compile (or appear to succeed) but no characters appear on the terminal.
 
-This is because PSOC Edge uses a different UART abstraction layer than PSOC 6. The retarget-io library needs additional initialization to route `_write()` syscalls through the correct UART driver.
+PSOC Edge uses a different UART abstraction layer. The retarget-io library requires a fully initialized `mtb_hal_uart_t` HAL object — not raw pin/HW parameters. You must perform PDL-level SCB UART initialization first, then pass the HAL object to `cy_retarget_io_init()`.
 
 ---
 
-## The Fix
+## The Fix — 3-Step UART Initialization
 
-Use the `--wrap=_write` linker flag and a custom `_write` wrapper:
+This pattern is used by all official Infineon PSOC Edge code examples. Create two files: `retarget_io_init.c` and `retarget_io_init.h`.
 
-### Step 1: Add linker flag to Makefile
-
-In your app Makefile (`proj_cm33_ns/Makefile` for PSOC Edge):
-
-```makefile
-LDFLAGS+=-Wl,--wrap=_write
-```
-
-### Step 2: Create the wrapper function
-
-Add to your `main.c` or a dedicated `retarget_io_wrapper.c`:
+### retarget_io_init.h
 
 ```c
+#ifndef _RETARGET_IO_INIT_H_
+#define _RETARGET_IO_INIT_H_
+
+#include "cybsp.h"
+#include "mtb_hal.h"
 #include "cy_retarget_io.h"
-#include <unistd.h>
 
-/* Wrap _write to route through retarget-io UART */
-int __wrap__write(int fd, const char *ptr, int len)
-{
-    (void)fd;  /* Ignore file descriptor — all output goes to debug UART */
+/* Macros for deepsleep callback (set RTS to NULL if unused) */
+#define DEBUG_UART_RTS_PORT     (NULL)
+#define DEBUG_UART_RTS_PIN      (0U)
 
-    for (int i = 0; i < len; i++)
-    {
-        cy_retarget_io_putchar(ptr[i]);
-    }
-    return len;
-}
+void init_retarget_io(void);
+
+#endif /* _RETARGET_IO_INIT_H_ */
 ```
 
-### Step 3: Initialize retarget-io normally
+### retarget_io_init.c
 
 ```c
-#include "cy_retarget_io.h"
+#include "retarget_io_init.h"
 
-void init_debug_uart(void)
+/* UART context and HAL objects */
+static cy_stc_scb_uart_context_t    DEBUG_UART_context;
+static mtb_hal_uart_t               DEBUG_UART_hal_obj;
+
+void init_retarget_io(void)
 {
-    cy_rslt_t result = cy_retarget_io_init(
-        CYBSP_DEBUG_UART_HW,
-        CYBSP_DEBUG_UART_TX,
-        CYBSP_DEBUG_UART_RX,
-        115200);
+    cy_rslt_t result;
+
+    /* Step 1: Initialize the SCB UART at PDL level */
+    result = (cy_rslt_t)Cy_SCB_UART_Init(CYBSP_DEBUG_UART_HW,
+                                          &CYBSP_DEBUG_UART_config,
+                                          &DEBUG_UART_context);
+    CY_ASSERT(result == CY_RSLT_SUCCESS);
+
+    /* Step 2: Enable the SCB block */
+    Cy_SCB_UART_Enable(CYBSP_DEBUG_UART_HW);
+
+    /* Step 3a: Set up the HAL shim over the PDL driver */
+    result = mtb_hal_uart_setup(&DEBUG_UART_hal_obj,
+                                 &CYBSP_DEBUG_UART_hal_config,
+                                 &DEBUG_UART_context, NULL);
+    CY_ASSERT(result == CY_RSLT_SUCCESS);
+
+    /* Step 3b: Initialize retarget-io — pass the HAL object, NOT raw pins */
+    result = cy_retarget_io_init(&DEBUG_UART_hal_obj);
     CY_ASSERT(result == CY_RSLT_SUCCESS);
 }
 ```
 
-Call `init_debug_uart()` **after** `cybsp_init()` in `main()`.
+### Makefile
 
----
+Add the LF→CRLF conversion define (optional but recommended for terminal readability):
 
-## Dual-Core Printf
+```makefile
+DEFINES+=CY_RETARGET_IO_CONVERT_LF_TO_CRLF
+```
 
-If both CM33 and CM55 print simultaneously, output interleaves at the character level (both share one physical UART). Two approaches:
+No special linker flags are needed.
 
-### Option A: Core-prefixed output (simple, recommended)
-
-Each core prefixes its printf with a tag. Output still interleaves but is readable:
+### Usage in main.c
 
 ```c
-/* CM33 side */
-#define LOGM(fmt, ...) printf("[CM33] " fmt "\n", ##__VA_ARGS__)
+#include "retarget_io_init.h"
 
-/* CM55 side */
-#define LOGC(fmt, ...) printf("[CM55] " fmt "\n", ##__VA_ARGS__)
+int main(void)
+{
+    cybsp_init();
+    init_retarget_io();
+
+    printf("Hello from PSOC Edge!\r\n");
+    /* ... */
+}
 ```
 
-### Option B: IPC-routed logging (advanced)
-
-CM55 sends log messages via IPC to CM33, which serializes all output through a single printf task. Higher complexity, but output never interleaves. See the /ipc-patterns skill for the message queue pattern.
-
-> **Important:** CM55 cannot directly access the UART (SCB2) on PSOC Edge — the Protection Policy Unit (PPU) blocks it. CM55 printf **must** use an IPC relay to CM33. This is a hardware-enforced restriction, not a software bug.
+Call `init_retarget_io()` **after** `cybsp_init()`.
 
 ---
 
-## Verification
+## Key Differences from PSOC 6 / PSOC Control
 
-After applying the fix, you should see output in your terminal (115200 baud, 8N1):
+| | PSOC 6 / PSOC Control | PSOC Edge E84 |
+|---|---|---|
+| **API signature** | `cy_retarget_io_init(HW, TX, RX, baud)` | `cy_retarget_io_init(&hal_obj)` |
+| **Pre-init required** | None — retarget-io handles everything | Yes — PDL init + HAL setup first |
+| **Config source** | Baud rate passed as parameter | UART config from Device Configurator (`CYBSP_DEBUG_UART_config`) |
+| **Typical files** | Just `#include "cy_retarget_io.h"` in main.c | Separate `retarget_io_init.c` / `.h` (official pattern) |
 
-```
-[CM33] cybsp_init complete
-[CM33] retarget-io initialized
-[CM33] WiFi connecting...
-```
+---
 
-If still no output:
-1. Verify the correct COM port is selected (KitProg3 debug UART)
-2. Check baud rate matches (115200)
-3. Verify `CYBSP_DEBUG_UART_TX/RX` pins are correct for your kit
-4. Ensure `cybsp_init()` is called before `cy_retarget_io_init()`
+## CM55 Printf
+
+CM55 on PSOC Edge uses the **same pattern** as CM33. Each core project (`proj_cm33_ns/` and `proj_cm55/`) gets its own `retarget_io_init.c` with the identical 3-step sequence, pointing to its own configured UART SCB.
+
+> **Note:** If both cores print to the same physical UART simultaneously, output may interleave at the character level. Prefix output with core tags for readability:
+>
+> ```c
+> /* CM33 side */
+> printf("[CM33] Starting WiFi...\r\n");
+>
+> /* CM55 side */
+> printf("[CM55] ML inference running\r\n");
+> ```
+>
+> For guaranteed non-interleaved output, route CM55 log messages through IPC to CM33 and serialize through a single print task. See the /ipc-patterns skill for message queue patterns.
+
+---
+
+## Troubleshooting
+
+If printf still produces no output after applying the correct initialization:
+
+1. **Verify Device Configurator** — `CYBSP_DEBUG_UART` must be configured as a UART personality in `design.modus`. The PDL config structs (`CYBSP_DEBUG_UART_config`, `CYBSP_DEBUG_UART_hal_config`) are generated from this.
+2. **Check COM port** — use the KitProg3 debug UART port (not the general USB serial)
+3. **Check baud rate** — must match the Device Configurator UART settings (typically 115200)
+4. **Call order** — `cybsp_init()` must complete before `init_retarget_io()`
+5. **Correct core project** — ensure each core's Makefile includes its own source files
+
+---
+
+## Reference
+
+Pattern sourced from official Infineon PSOC Edge code examples:
+- `Infineon/mtb-example-psoc-edge-hello-world` (CM33)
+- `Infineon/mtb-example-psoc-edge-ml-deepcraft-deploy-motion` (CM55)

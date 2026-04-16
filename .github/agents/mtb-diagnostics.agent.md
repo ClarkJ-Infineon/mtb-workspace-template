@@ -69,45 +69,67 @@ Work through in order — most MTB build failures fall into one of these categor
 
 # Part 2: Printf Not Working (PSOC Edge)
 
-> **Applies to:** PSOC Edge E84 only. PSOC 6 works with standard `cy_retarget_io_init()`.
+> **Applies to:** PSOC Edge E84 only. PSOC 6 and PSOC Control use a simpler `cy_retarget_io_init()` signature.
 
 ## The Problem
 
-`cy_retarget_io_init()` returns success but no output appears. PSOC Edge needs a `_write` wrapper.
+Using the PSOC 6-style `cy_retarget_io_init(HW, TX, RX, baud)` on PSOC Edge produces no output. PSOC Edge requires PDL-level UART initialization before retarget-io.
 
-## The Fix
+## The Fix — 3-Step UART Initialization
 
-### Step 1: Linker flag
-```makefile
-# proj_cm33_ns/Makefile
-LDFLAGS+=-Wl,--wrap=_write
-```
+Create `retarget_io_init.c` / `.h` (pattern from official Infineon CEs):
 
-### Step 2: Wrapper function
 ```c
+#include "cybsp.h"
+#include "mtb_hal.h"
 #include "cy_retarget_io.h"
-#include <unistd.h>
 
-int __wrap__write(int fd, const char *ptr, int len)
+static cy_stc_scb_uart_context_t    DEBUG_UART_context;
+static mtb_hal_uart_t               DEBUG_UART_hal_obj;
+
+void init_retarget_io(void)
 {
-    (void)fd;
-    for (int i = 0; i < len; i++)
-        cy_retarget_io_putchar(ptr[i]);
-    return len;
+    cy_rslt_t result;
+
+    /* Step 1: PDL-level SCB UART init */
+    result = (cy_rslt_t)Cy_SCB_UART_Init(CYBSP_DEBUG_UART_HW,
+                                          &CYBSP_DEBUG_UART_config,
+                                          &DEBUG_UART_context);
+    CY_ASSERT(result == CY_RSLT_SUCCESS);
+
+    /* Step 2: Enable the SCB */
+    Cy_SCB_UART_Enable(CYBSP_DEBUG_UART_HW);
+
+    /* Step 3a: HAL shim setup */
+    result = mtb_hal_uart_setup(&DEBUG_UART_hal_obj,
+                                 &CYBSP_DEBUG_UART_hal_config,
+                                 &DEBUG_UART_context, NULL);
+    CY_ASSERT(result == CY_RSLT_SUCCESS);
+
+    /* Step 3b: retarget-io — pass HAL object, NOT raw pins */
+    result = cy_retarget_io_init(&DEBUG_UART_hal_obj);
+    CY_ASSERT(result == CY_RSLT_SUCCESS);
 }
 ```
 
-### Step 3: Init after cybsp_init()
-```c
-cy_rslt_t result = cy_retarget_io_init(
-    CYBSP_DEBUG_UART_HW, CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, 115200);
-CY_ASSERT(result == CY_RSLT_SUCCESS);
+Makefile (optional but recommended):
+```makefile
+DEFINES+=CY_RETARGET_IO_CONVERT_LF_TO_CRLF
 ```
 
+No special linker flags needed.
+
+## Key Difference from PSOC 6
+
+| PSOC 6 / PSOC Control | PSOC Edge E84 |
+|---|---|
+| `cy_retarget_io_init(HW, TX, RX, baud)` | `cy_retarget_io_init(&hal_obj)` |
+| No pre-init needed | PDL init + HAL setup required first |
+
 ## Dual-Core Printf
-- **Simple:** Core-prefixed macros (`[CM33]`/`[CM55]` tags). Output interleaves but is readable.
+- Both CM33 and CM55 use the same `retarget_io_init.c` pattern with their own UART SCB.
+- **Simple:** Core-prefixed tags (`[CM33]`/`[CM55]`). Output may interleave but is readable.
 - **Advanced:** IPC ring buffer relay — see `mtb-multicore` agent for the transparent printf pattern.
-- **Important:** CM55 cannot access UART (PPU blocks SCB2). CM55 printf **must** use IPC relay.
 
 ## Still No Output?
 1. Correct COM port? (KitProg3 debug UART)

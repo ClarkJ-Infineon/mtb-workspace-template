@@ -209,13 +209,15 @@ SPSC (single-producer single-consumer) — no lock needed. Each index owned by o
 # Part 5: Cross-Core Transparent Printf
 
 ## Problem
-CM33 NS has no UART access (PPU blocks it). Without this pattern, CM33 printf is silently lost.
+When both CM33 and CM55 print to the same UART, output interleaves at the character level. This pattern serializes output through a shared ring buffer.
+
+> **Note:** Both CM33 and CM55 can independently access their own UART SCB — this pattern is optional. Use it only when you need clean, non-interleaved output from both cores.
 
 ## Architecture
 ```
-CM33 NS:  printf() → __wrap__write() → shared ring buffer (IPC locked)
-CM55:     printf() → __wrap__write() → shared ring buffer (IPC locked)
-CM55:     drain_task reads ring → UART output
+CM33 NS:  printf() → ring_write() → shared ring buffer (IPC locked)
+CM55:     drain_task reads ring → UART output (via standard retarget-io)
+CM55:     printf() → direct UART output (via standard retarget-io)
 ```
 
 ## Ring Buffer (shared header)
@@ -251,9 +253,9 @@ static inline void mutex_release(void) {
 
 ## Linker Hook + Drain Task
 
-Both Makefiles: `LDFLAGS+=-Wl,--wrap=_write`
+CM33 NS overrides `_write` to redirect printf to the shared ring buffer instead of its local UART. CM55 runs a drain task that reads the ring buffer and outputs to UART.
 
-`__wrap__write()` line-buffers then writes to ring. Drain task on CM55 reads ring → `__real__write()` to UART.
+> **Note:** The `--wrap=_write` approach is one option for IPC-routed printf. An alternative is to use explicit logging macros (e.g., `LOG_CM33(...)`) that write to the ring buffer directly, avoiding linker hooks entirely.
 
 ## Build Roles
 
@@ -263,7 +265,10 @@ DEFINES+=DUAL_PRINTF_ROLE_UART_OWNER
 
 # proj_cm33_ns/Makefile:
 DEFINES+=DUAL_PRINTF_ROLE_IPC_REMOTE
+LDFLAGS+=-Wl,--wrap=_write
 ```
+
+Only the IPC_REMOTE side (CM33 NS) needs the `--wrap=_write` flag — it redirects CM33's printf to the ring. CM55 prints directly to UART and also drains CM33's ring buffer.
 
 ---
 
@@ -284,4 +289,4 @@ DEFINES+=DUAL_PRINTF_ROLE_IPC_REMOTE
 3. **Ring buffer overflow** — bytes silently dropped; increase size or reduce volume
 4. **Boot ordering** — CM55 must init ring/shared data before CM33 reads it
 5. **IPC channel collision** — channels 0–7 typically reserved by BSP
-6. **`__real__write` missing** — only exists with `--wrap=_write` in LDFLAGS
+6. **`__real__write` missing** — only exists on the core with `--wrap=_write` in LDFLAGS (IPC_REMOTE side only)
