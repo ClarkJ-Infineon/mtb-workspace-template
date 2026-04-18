@@ -105,3 +105,51 @@ For IPC data exchange, use the `/ipc-patterns` skill. The shared memory section 
 | CM55 starts before CM33 is ready | HardFault or IPC deadlock on boot | Add boot synchronization handshake |
 | No `FreeRTOSConfig.h` in `proj_cm55/` | CM55 uses CM33's config (wrong heap, stack sizes) | Create separate `FreeRTOSConfig.h` in `proj_cm55/` |
 | CM55 tries to use UART directly | No output (PPU blocks CM55 from SCB2) | Use IPC relay for CM55 printf — see /retarget-io-fix skill |
+
+---
+
+## Peripheral-to-Core Assignment
+
+Not all peripherals are accessible from both cores. The PPU (Protection Policy Unit) restricts CM55 from accessing certain CM33-reserved peripherals — a PPU violation produces a BusFault with no runtime error message.
+
+### Assignment Rules
+
+| Capability | Typical Core | Reason |
+|---|---|---|
+| WiFi, BLE, MQTT, cloud connectivity | CM33 | Radio hardware access, TLS stack |
+| LVGL display, touch input | CM55 | Compute-intensive rendering, GPU access |
+| Sensors on display I2C bus | CM55 | Shared SCB — same core as display touch |
+| Sensors on independent I2C/SPI | Either | Assign to whichever core needs the data |
+| Audio/DSP processing | CM55 | Helium/MVE SIMD acceleration |
+| ML inference | CM55 | Ethos-U55 NPU access |
+
+### Shared Bus Rule
+
+**If two peripherals share the same I2C/SPI bus (SCB instance), they must be managed by the same core.** There is no hardware arbitration between cores on a shared SCB — simultaneous access corrupts transactions.
+
+Example: An EVK may expose I2C pins on Arduino headers that share the same SCB instance used by a display touch controller. Any external sensor connected to those shared pins must be driven by the same core that owns the touch controller.
+
+**How to check:** Device Configurator → Peripherals → examine which SCB instances are assigned.
+
+---
+
+## Memory Rebalancing for Dual-Core Projects
+
+BSP defaults split System SRAM roughly evenly between CM33 code and data. In practice, CM33 code is small (runs from flash) while runtime data (WiFi/MQTT/TLS heaps, stacks, BSS) fills up fast.
+
+### When to Rebalance
+
+| Adding to CM33 | Memory Pressure | Action |
+|---|---|---|
+| WiFi + TLS | High (~530 KB data) | Shrink `m33_code`, grow `m33_data` |
+| MQTT | Moderate (+30-50 KB) | Check `m33_data` headroom |
+| BLE stack | Moderate (+60-100 KB) | Check `m33_data` headroom |
+
+### How to Rebalance
+
+1. Open `design.modus` → **Memory Configuration** (not Peripherals)
+2. Regions are contiguous — shrinking one grows its neighbor
+3. Totals must match hardware: System SRAM = `0x100000` (1 MB), SOCMEM = `0x500000` (5 MB)
+4. Save → clean rebuild required: `make clean && make build`
+
+> For display-specific memory (gfx_mem sizing, framebuffer formula), see /lvgl-setup §9.

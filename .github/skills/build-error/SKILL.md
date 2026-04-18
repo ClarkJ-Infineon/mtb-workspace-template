@@ -61,6 +61,16 @@ Read `CONTEXT.md` first to confirm the target device family, kit, and toolchain 
 **Check:** Was the project created via `project-creator-cli` or was it manually assembled?
 **Fix:** Use the /project-creation skill to create the project correctly. Manual project assembly is not a supported workflow.
 
+### 10. Memory region overflow (PSOC Edge linker error)
+**Symptoms:** Linker error mentioning `.data` or `.bss` section overflow; region `m33_data` or `m55_data` overflowed.
+**Check:** Run `arm-none-eabi-size` on the .elf to see actual usage vs. region capacity.
+**Fix:** Open `design.modus` → Memory Configuration → rebalance regions. Common fix: shrink `m33_code` (typically underutilized), grow `m33_data`. See /dual-core-setup skill for memory rebalancing guidance.
+
+### 11. Clock configuration mismatch
+**Symptoms:** UART baud rate wrong (garbled output), timers run at wrong speed, performance doesn't match expectations.
+**Check:** Verify actual clock frequencies from `bsps/TARGET_*/config/GeneratedSource/cycfg_clocks.c` — search for `desiredFrequency` and `CLKHF` defines. CM55 may be at 400 MHz, not 240 MHz as sometimes documented.
+**Fix:** Adjust peripheral clock dividers in Device Configurator → Clocks tab, or update application code to use the correct frequency constants.
+
 ---
 
 After identifying the root cause, provide:

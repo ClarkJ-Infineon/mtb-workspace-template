@@ -253,3 +253,152 @@ print /x *(uint32_t*)0xE000EF50           # CCR register, bit 16 = DCache enable
 5. **FreeRTOS tasks not showing** — Requires `-rtos auto` in OpenOCD config and FreeRTOS symbols in .elf.
 6. **"Target not halted"** — Issue `monitor halt` before memory/register reads.
 7. **Post-mortem** — Read CFSR/BFAR/MMFAR before reset (cleared on reset).
+
+---
+
+# Part 6: LVGL / Display Runtime Diagnosis (PSOC Edge E84)
+
+## Symptom → Check Table
+
+| Symptom | First Check | Likely Cause |
+|---------|-------------|--------------|
+| UI freeze (no render, no touch response) | `transform_scale` on `LV_SIZE_CONTENT` widget? | LVGL infinite layout recalculation loop — set explicit size before applying scale |
+| Broken images ("X" placeholder) | Image header byte order: BGRA not ARGB? | ARM little-endian stores ARGB8888 as B-G-R-A in memory. Custom C array generators must use BGRA byte order |
+| Screen flickering (animation-correlated) | Opacity animation on a **container with children**? | LVGL allocates a temp layer buffer every frame when container opa < 255. Move opacity to individual children instead (see `mtb-display` agent §10) |
+| Frame drops during animations | `shadow_width` on objects with text children? `line_rounded` on lv_line? | Both force SW rendering fallback. Use `border_width` + `border_opa` for glow; avoid `line_rounded` |
+| Crash after screen transition | Missing `LV_EVENT_DELETE` handler? Timer still running? | LVGL timers fire on deleted widgets → stale pointer → HardFault. Always register cleanup in `LV_EVENT_DELETE` |
+| Black frame flicker (occasional) | Large translucent area? Multiple concurrent animations? | Reduce concurrent animation count (practical limit: 4-5). Check if any container opa < 255 with children |
+| SW renderer saturation | Text labels with opacity animation? | Text is ALWAYS SW-rendered (no font→GPU path). Avoid high-frequency opacity changes on labels |
+
+## LVGL Memory Diagnosis
+
+```gdb
+# Check LVGL heap usage (if lv_mem_monitor enabled)
+print lv_mem_monitor()
+
+# Check FreeRTOS heap remaining
+print xPortGetFreeHeapSize()
+print xPortGetMinimumEverFreeHeapSize()
+
+# Inspect VG-Lite GPU heap
+x/4xw &contiguous_mem
+```
+
+## VG-Lite GPU Status
+
+```gdb
+# Read GPU idle/busy register (GCNANO)
+x/xw 0x49000004    # GPU status register (0 = idle)
+
+# Check if GPU is stuck
+monitor halt
+x/xw 0x49000000    # GPU chip ID (should read 0x265)
+```
+
+---
+
+# Part 7: Memory Layout Diagnosis (PSOC Edge E84)
+
+## When to Suspect Memory Partitioning Issues
+
+On PSOC Edge E84, System SRAM (1 MB) and SOCMEM (5 MB) are subdivided into named regions via Device Configurator → Memory Configuration. The generated linker scripts enforce these boundaries. **Symptoms often appear as linker errors or runtime crashes that look unrelated to memory.**
+
+## Symptom → Check Table
+
+| Symptom | First Check | Likely Cause |
+|---------|-------------|--------------|
+| Linker error: `.data` or `.bss` section overflow | `arm-none-eabi-size` on the .elf — compare to region capacity | Data region too small for heap + stacks + BSS. Common when adding WiFi/MQTT to CM33 |
+| Linker error: `.text` section overflow | Check code region size vs firmware size | Code region too small — rare for CM33, possible for CM55 with large LVGL apps |
+| HardFault immediately at boot | Check if stack pointer lands in valid RAM | Stack placed outside allocated region — memory regions may have shifted after resize |
+| Crash during `malloc()` or FreeRTOS `pvPortMalloc()` | `print xPortGetFreeHeapSize()` in GDB | Heap exhausted — region may be correctly sized but heap within it is undersized |
+| Display corruption or partial rendering | Check `gfx_mem` size vs framebuffer needs | `gfx_mem` too small for framebuffers + GPU heap. See `mtb-display` agent §9 |
+| BusFault (PRECISERR) accessing shared memory | Check `m33_m55_shared` region and address alignment | Shared memory region missing or address changed after Device Configurator edit |
+| Works in Debug, crashes in Release | Compare linker maps between configs | Region borderline in Debug — Release layout differs due to optimization/LTO |
+
+## Diagnostic Steps
+
+### 1. Check region utilization
+```bash
+# Memory usage per core
+arm-none-eabi-size build/[CONFIG]/proj_cm33_ns/proj_cm33_ns.elf
+arm-none-eabi-size build/[CONFIG]/proj_cm55/proj_cm55.elf
+
+# Detailed section breakdown
+arm-none-eabi-objdump -h build/[CONFIG]/proj_cm33_ns/proj_cm33_ns.elf | grep -E "\.text|\.data|\.bss|\.heap"
+```
+
+### 2. Check runtime heap status (GDB)
+```gdb
+print xPortGetFreeHeapSize()
+print xPortGetMinimumEverFreeHeapSize()
+print uxTaskGetStackHighWaterMark(NULL)
+```
+
+### 3. Verify region boundaries
+```gdb
+print &__cm33_data_start
+print &__cm33_data_end
+print &__heap_start
+print &__heap_end
+```
+
+## Common Imbalance
+
+BSP defaults split System SRAM roughly evenly between CM33 code and data. In practice, CM33 code is small (runs from flash) while runtime data (middleware heaps, stacks, BSS) fills up. Projects using WiFi, BLE, MQTT, or TLS on CM33 almost always need the data region grown at the expense of the code region.
+
+**Fix:** `design.modus` → Memory Configuration → shrink `m33_code`, grow `m33_data`. Regions are contiguous — resizing one shifts neighbors. Totals must equal hardware: System SRAM = `0x100000`, SOCMEM = `0x500000`. Clean rebuild required.
+
+---
+
+# Part 8: Clock Configuration Verification (PSOC Edge E84)
+
+## Why This Matters
+
+PSOC Edge core frequencies are not fixed — they are configured via PLL and clock dividers in Device Configurator. Documentation, datasheets, and even BSP defaults may list different speeds than what's actually running. Incorrect clock assumptions lead to wrong baud rates, incorrect timer periods, and misleading performance benchmarks.
+
+## How Clocks Are Configured
+
+```
+PLL source → PLLxxx[n] → CLKHFn (divider) → Core/Peripheral
+```
+
+The definitive source is `bsps/TARGET_*/config/GeneratedSource/cycfg_clocks.c` — generated from `design.modus`.
+
+## Key Clock Assignments (PSOC Edge E84 EVK defaults)
+
+| Clock | Typical Source | Typical Frequency | Drives |
+|---|---|---|---|
+| CLKHF0 | PLL250M[0] ÷ 2 | 200 MHz | CM33 core |
+| CLKHF1 | PLL250M[0] ÷ 1 | ~400 MHz | CM55 core |
+| CLKHF2 | PLL500M[0] | 300 MHz | GFXSS (display controller, GPU) |
+
+> **Common misconception:** CM55 is sometimes documented at 240 MHz. On the EVK, PLL250M[0] is typically configured to 400 MHz with CLKHF1 divider = 1, yielding ~399 MHz actual. Always verify from generated source.
+
+## How to Verify Actual Clock Frequencies
+
+### From generated source (authoritative)
+```bash
+# Search for CLKHF frequency defines
+grep -n "desiredFrequency\|CLKHF.*Freq" bsps/TARGET_*/config/GeneratedSource/cycfg_clocks.c
+```
+
+### At runtime (GDB)
+```gdb
+# Read CM33 core clock
+print SystemCoreClock
+
+# Read PLL output frequency from generated config
+print cy_stc_pll_config_PLL250M_0.desiredFrequency
+```
+
+### From Device Configurator
+Open `design.modus` → Clocks tab → examine PLL configurations and CLKHF divider chains.
+
+## When to Suspect Clock Issues
+
+| Symptom | Check |
+|---|---|
+| UART baud rate wrong (garbled output) | Peripheral clock source frequency changed |
+| Timers run faster/slower than expected | Core clock or timer clock divider mismatch |
+| Performance benchmarks don't match datasheet | Verify actual core frequency from `cycfg_clocks.c` |
+| Display refresh rate incorrect | Check CLKHF2 (GFXSS clock source) |

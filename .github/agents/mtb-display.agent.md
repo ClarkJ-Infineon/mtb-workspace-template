@@ -245,19 +245,181 @@ These contain Infineon-specific GFXSS adaptations. **Do NOT write from scratch.*
 
 ---
 
-## 9. Memory Budget
+## 9. Memory Budget and Device Configurator Memory Configuration
 
-| Item | 4.3" (832×480) | 7"/10.1" (1024×600) |
+### 9a. Display Memory Sizing
+
+| Item | Formula | 4.3" (832×480) | 7"/10.1" (1024×600) |
+|---|---|---|---|
+| Framebuffer × 2 | `FB_W × FB_H × 2 (RGB565) × 2` | ~1.6 MB | ~2.4 MB |
+| VGLite heap | `LV_VG_LITE_THORVG_BUF_ADDR_ALIGN` region | ~245 KB | ~245 KB |
+| **Total gfx_mem needed** | FB + VGLite + headroom | **~2.0 MB min** | **~2.85 MB min** |
+| FreeRTOS heap (min) | Depends on task count | 50 KB | 50 KB |
+| GFX task stack | `lv_timer_handler` depth | 32 KB | 32 KB |
+| LVGL working memory | Widgets, styles, draw buffers | 200–400 KB | 300–600 KB |
+
+> **Framebuffer formula:** `width × height × bytes_per_pixel × num_buffers`
+> For 4.3" DSI: `832 × 480 × 2 × 2 = 1,597,440 bytes` (~1.52 MB)
+> VG-Lite GPU requires stride-aligned width (832, not 800) for DMA.
+
+### 9b. PSOC Edge E84 Memory Architecture
+
+The Device Configurator **Memory Configuration** personality controls how on-chip memory is partitioned between cores. Changes here generate linker scripts in `bsps/TARGET_*/config/GeneratedSource/`.
+
+| Region | Total | Contains | Notes |
+|---|---|---|---|
+| **System SRAM** | 1 MB (`0x100000`) | `m33_code`, `m33_data` | CM33 code and data — often imbalanced in defaults |
+| **SOCMEM** | 5 MB (`0x500000`) | `m55_code`, `m55_data`, `m55_data_secondary`, `gfx_mem`, `m33_m55_shared` | CM55 app + display buffers |
+| **Flash** | 8 MB | Per-core flash regions | Rarely needs rebalancing |
+| **DTCM** | 128 KB | CM55 fast data | Stack, critical vars |
+| **ITCM** | 64 KB | CM55 fast code | `LV_ATTRIBUTE_FAST_MEM` target |
+
+### 9c. gfx_mem Sizing (CRITICAL for Display Projects)
+
+The `gfx_mem` region in SOCMEM holds framebuffers and VG-Lite GPU heap. Undersized = display corruption or GPU faults.
+
+**Sizing formula:**
+```
+gfx_mem_bytes = (FB_WIDTH × FB_HEIGHT × 2 × NUM_BUFFERS) + VGLITE_HEAP_SIZE + HEADROOM
+
+Example (4.3" display, 3 MB gfx_mem = 0x300000):
+  Framebuffers: 832 × 480 × 2 × 2 = 1,597,440 bytes (1.52 MB)
+  VG-Lite heap: 250,880 bytes (0.24 MB)
+  Total used:   1,808 KB of 3,072 KB (59% — healthy headroom)
+```
+
+**Utilization target:** 50-75%. Below 50% = wasting SOCMEM that CM55 could use. Above 80% = risk of VG-Lite allocation failures under load.
+
+**How to verify utilization:** Check linker map for `.cy_gpu_buf` section, or inspect at runtime:
+```gdb
+x/4xw &contiguous_mem       # VG-Lite heap base
+print xPortGetFreeHeapSize() # FreeRTOS heap (separate from gfx_mem)
+```
+
+### 9d. Common Memory Imbalances and Fixes
+
+| Symptom | Root Cause | Fix in Device Configurator |
 |---|---|---|
-| Framebuffer × 2 | ~1.6 MB | ~2.4 MB |
-| VGLite heap | ~245 KB | ~245 KB |
-| **Total .cy_gpu_buf** | **~1.8 MB** | **~2.65 MB** |
-| FreeRTOS heap (min) | 50 KB | 50 KB |
-| GFX task stack | 32 KB | 32 KB |
+| CM33 linker error: `.data` or `.bss` overflow | `m33_code` oversized, `m33_data` undersized | Shrink `m33_code` (128 KB is sufficient for connectivity-only CM33), grow `m33_data` |
+| Display corruption, partial rendering | `gfx_mem` too small for 2× framebuffers + VG-Lite | Grow `gfx_mem` — use formula above; shrink `m55_data_secondary` |
+| CM55 crash during LVGL init | `m55_data` or `m55_data_secondary` too small for LVGL heap | Grow `m55_data_secondary` — LVGL + widgets need 200-400 KB minimum |
+| WiFi/MQTT stack crashes on CM33 | `m33_data` < 512 KB with WiFi + MQTT + TLS | CM33 with full WiFi stack needs ~530 KB data minimum |
+
+### 9e. Device Configurator Memory Configuration Workflow
+
+**To rebalance memory regions:**
+
+1. Open `design.modus` in Device Configurator
+2. Navigate to **Memory Configuration** (not Peripherals)
+3. Regions are contiguous within each memory block — changing one size shifts neighbors
+4. **Verify address continuity:** each region's start = previous region's start + size
+5. Save → generates updated linker scripts in `GeneratedSource/`
+6. Clean build required: `make clean && make build`
+
+**Key rules:**
+- Totals must match hardware: System SRAM = `0x100000`, SOCMEM = `0x500000`
+- Regions are contiguous — no gaps allowed between regions in the same memory block
+- Hex entry is easiest: calculate sizes in hex, verify with `start + size = next_start`
+- Always rebuild after changes — linker scripts are generated artifacts
+
+### 9f. Reference: Display Project Memory Layout (4.3" DSI, Dual-Core)
+
+Proven layout from smart-appliance project (CM55 LVGL + CM33 WiFi/MQTT):
+
+| Region | Start | Size (hex) | Size (KB) | Purpose |
+|---|---|---|---|---|
+| **System SRAM** | | | **1024** | |
+| m33_code | `0x24000000` | `0x20000` | 128 | CM33 flash-resident; code is small |
+| m33_data | `0x24020000` | `0x85000` | 532 | WiFi/MQTT/TLS heap, stacks, BSS |
+| m33_ns_ipc | `0x240A5000` | `0x1000` | 4 | IPC driver |
+| m33_reserved | — | — | — | BSP default (keep) |
+| **SOCMEM** | | | **5120** | |
+| m55_code | `0x24100000` | `0xC8000` | 800 | LVGL + app code (XIP or copy) |
+| m55_data | `0x241C8000` | `0x80000` | 512 | LVGL heap, FreeRTOS heap, BSS |
+| m55_data_secondary | `0x24248000` | `0x198000` | 1632 | Overflow data, large arrays |
+| gfx_mem | `0x243E0000` | `0x300000` | 3072 | 2× framebuffers + VG-Lite heap |
+| m33_m55_shared | `0x246E0000` | `0x8000` | 32 | Lock-free IPC struct |
+
+> **This layout is a starting point.** Adjust `gfx_mem` and `m55_data_secondary` based on display size and application complexity. Always verify totals equal hardware capacity.
 
 ---
 
-## 10. Top Pitfalls
+## 10. VG-Lite Performance — Avoiding Flicker and Frame Drops
+
+### The Layer Compositing Trap (CRITICAL)
+
+**When a container/parent object has `opa < LV_OPA_COVER` (255) and has children, LVGL allocates a temporary layer buffer, renders all children into it, then composites the layer onto the framebuffer at the target opacity — EVERY FRAME the object is dirty.**
+
+This is the #1 cause of animation flicker on PSOC Edge E84.
+
+**Bad pattern — container opacity animation (forces layer compositing):**
+```c
+/* DON'T: animating opa on a group with children */
+lv_obj_set_style_opa(group, LV_OPA_TRANSP, LV_PART_MAIN);
+lv_anim_set_exec_cb(&a, set_opa);  /* changes group opa → layer alloc per frame */
+```
+
+**Good pattern — per-child opacity animation (no layers needed):**
+```c
+/* DO: animate opa on each child individually (no children → no layer) */
+static void set_children_opa(void *obj, int32_t v) {
+    uint32_t cnt = lv_obj_get_child_count((lv_obj_t *)obj);
+    for (uint32_t i = 0; i < cnt; i++) {
+        lv_obj_set_style_opa(lv_obj_get_child((lv_obj_t *)obj, i), v, LV_PART_MAIN);
+    }
+}
+/* Container stays fully opaque, children get per-element opa */
+lv_anim_set_exec_cb(&a, set_children_opa);
+```
+
+### What Gets GPU-Accelerated vs. Software Fallback
+
+The PSOC Edge E84 GCNANO (ChipID 0x265) has a preference score of 80/255 in LVGL's draw dispatch.
+
+| Render Type | GPU? | Notes |
+|---|---|---|
+| FILL (solid, gradient) | ✅ Yes | Linear gradients only (no radial) |
+| BORDER | ✅ Yes | |
+| IMAGE (RGB565, ARGB8888) | ✅ Yes | Format-dependent |
+| ARC, LINE, TRIANGLE | ✅ Yes | `line_rounded` may fall back to SW |
+| BOX_SHADOW | ✅ if enabled | Set `LV_VG_LITE_USE_BOX_SHADOW 1` in lv_conf.h |
+| **LABEL (text)** | ❌ Always SW | No font→GPU path exists in LVGL |
+| Radial gradient | ❌ No | Hardware doesn't support it |
+| Gaussian blur | ❌ No | Hardware doesn't support it |
+
+### Animation Performance Rules
+
+1. **Never animate opacity on containers with children** — use per-child opa or pre-rendered layers
+2. **Text (labels) are always SW-rendered** — avoid high-frequency opacity animations on text objects (causes constant SW re-rendering)
+3. **`translate_x`/`translate_y` animations** invalidate both old and new positions — minimize the moving area
+4. **`LV_VG_LITE_FLUSH_MAX_COUNT = 0`** enables CPU/GPU parallelism — critical for text-heavy UIs where SW and GPU rendering overlap
+5. **Keep concurrent animations low** — 4-5 simultaneous animations is the practical limit before frame drops
+6. **`shadow_width` on objects with text children** forces SW fallback — use `border_width` + `border_opa` instead for glow effects
+7. **Prefer LVGL drawing primitives over bitmap assets for animated elements** — arcs, lines, circles, and shapes are GPU-native (VG-Lite renders them directly), resolution-independent, zero asset management, and easier to animate (change draw parameters, not swap bitmaps). Reserve bitmap images for static content like hero images and photos
+
+### Recommended `lv_conf.h` Tuning (Performance)
+
+```c
+/* GPU/CPU parallelism — 0 means flush immediately, letting CPU do SW work while GPU renders */
+#define LV_VG_LITE_FLUSH_MAX_COUNT  0
+
+/* GPU-accelerated box shadows (layered borders, not true shadows) */
+#define LV_VG_LITE_USE_BOX_SHADOW   1
+
+/* Right-size GPU caches to save memory — defaults are 32 each */
+#define LV_VG_LITE_GRAD_CACHE_CNT   4   /* Increase if using many gradients */
+#define LV_VG_LITE_STROKE_CACHE_CNT 8   /* Increase if using many stroked paths */
+```
+
+### GCNANO 0x265 Hardware Capabilities (12 of 45 VG-Lite features)
+
+**Supported:** IM_INDEX_FORMAT, SCISSOR, BORDER_CULLING, RGBA2_FORMAT, DOUBLE_IMAGE, YUV_OUTPUT, IM_INPUT, SRC_PREMULTIPLIED, PARALLEL_PATHS, STRIPE_MODE, YUY2_INPUT, 16PIXELS_ALIGN
+
+**NOT supported (key gaps):** QUALITY_8X (max 4x AA), RADIAL_GRADIENT, GLOBAL_ALPHA, GAUSSIAN_BLUR, COLOR_KEY, MASK, MIRROR, GAMMA, DITHER, COLOR_TRANSFORMATION
+
+GPU fill rate: 200 Mpixels/s | Max display: 1024×768@60Hz | 8 Porter-Duff blend modes
+
+## 11. Top Pitfalls
 
 1. **Missing GFXSS personality** → dozens of undefined symbols (§4)
 2. **Framebuffers not in `.cy_gpu_buf`** → black screen or GPU hard fault
@@ -269,12 +431,16 @@ These contain Infineon-specific GFXSS adaptations. **Do NOT write from scratch.*
 8. **FT5406 touch inverted** → invert x/y in read callback
 9. **`COMPONENTS+=GFXSS` missing from `common.mk`** → `cy_graphics.h` not found
 10. **D-cache stale lines after `cybsp_init()`** → IPC/shared-memory corruption
+11. **Animating opacity on containers with children** → layer compositing every frame → flicker (§10)
 
 ## Verification Checklist
 
 - [ ] `make getlibs` completes (all `.mtb` deps resolved)
 - [ ] `make build` succeeds for all three cores
 - [ ] Device Configurator shows GFXSS personality enabled
+- [ ] Memory Configuration: `gfx_mem` ≥ 2× framebuffer + VG-Lite heap (use formula in §9c)
+- [ ] Memory Configuration: region totals = System SRAM `0x100000` + SOCMEM `0x500000`
+- [ ] Memory Configuration: all regions contiguous (no address gaps)
 - [ ] 4 VG-Lite override files present in `proj_cm55/`
 - [ ] `lv_conf.h` has `LV_COLOR_DEPTH 16`, `LV_USE_OS LV_OS_FREERTOS`, `LV_USE_DRAW_VG_LITE 1`
 - [ ] Display shows UI content (not black, not garbled)

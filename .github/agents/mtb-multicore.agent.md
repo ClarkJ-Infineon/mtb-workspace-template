@@ -80,6 +80,36 @@ int main(void)
 | No `FreeRTOSConfig.h` in `proj_cm55/` | CM55 uses CM33's config (wrong sizes) | Create separate config |
 | CM55 tries UART directly | No output (PPU blocks SCB2) | Use IPC printf relay (Part 4) |
 
+## Peripheral-to-Core Assignment
+
+Not all peripherals are accessible from both cores. Use these rules to decide which core owns which peripheral:
+
+### PPU (Protection Policy Unit) Constraints
+
+The PPU restricts CM55 from accessing certain CM33-reserved peripherals. A PPU violation = BusFault with BFAR pointing to the peripheral address. **No runtime error message** — just a silent fault.
+
+- **WiFi/BLE radio (CYW55500):** CM33 only — the combo chip interfaces through CM33-reserved peripherals
+- **Debug UART (SCB2):** CM33 only by default — CM55 needs the IPC printf relay (Part 4) for output
+
+### Shared Bus Awareness
+
+**If two peripherals share the same I2C/SPI bus (SCB instance), they must be managed by the same core.** There is no hardware arbitration between cores on a shared SCB — simultaneous access from CM33 and CM55 will corrupt transactions.
+
+Common scenario: An EVK may expose I2C pins on Arduino headers that share the same SCB instance used by an on-board peripheral (e.g., a display touch controller). Any external sensor connected to those shared pins must be driven by the same core that owns the on-board peripheral.
+
+**How to check:** Open Device Configurator → Peripherals → examine which SCB instances are assigned and what they connect to. Each SCB can only be safely owned by one core.
+
+### General Assignment Guidance
+
+| Capability | Typical Core | Reason |
+|---|---|---|
+| WiFi, BLE, MQTT, cloud connectivity | CM33 | Radio hardware access, TLS stack |
+| LVGL display, touch input | CM55 | Compute-intensive rendering, GPU access |
+| Sensors on display I2C bus | CM55 | Shared SCB — same core as display touch |
+| Sensors on independent I2C/SPI | Either | Assign to whichever core needs the data directly |
+| Audio/DSP processing | CM55 | Helium/MVE SIMD acceleration |
+| ML inference | CM55 | Ethos-U55 NPU access |
+
 ---
 
 # Part 2: IPC — Semaphore-Guarded Shared Memory
