@@ -49,6 +49,8 @@ DEFINES+=configENABLE_MVE=1
 
 > **Critical:** Without `configENABLE_MVE=1`, FreeRTOS will not save MVE/Helium registers on context switch. Any task using SIMD intrinsics will silently corrupt data when preempted.
 
+> **Stack sizing for graphics:** If CM55 runs LVGL, set `configMINIMAL_STACK_SIZE = 512` (32 KB) in CM55's `FreeRTOSConfig.h`. Non-graphics projects typically default to 128 (1 KB), which causes immediate stack overflow when LVGL allocates framebuffers. Stack overflow manifests as HardFault with no useful backtrace.
+
 ## Step 3: Boot Synchronization (CM33 side)
 
 In `proj_cm33_ns/main.c`, CM33 must initialize IPC and enable CM55 **before** CM55 attempts any IPC:
@@ -91,9 +93,33 @@ int main(void)
 }
 ```
 
+### D-Cache Invalidation After cybsp_init() (CRITICAL)
+
+On CM55, the Reset_Handler enables D-Cache BEFORE `cybsp_init()` configures MPU non-cacheable regions. This means shared memory locations are cached during the boot window. After `cybsp_init()` returns, those stale cache lines persist even though MPU now marks the regions as non-cacheable.
+
+**Fix:** Immediately after `cybsp_init()` in CM55 `main.c`:
+
+```c
+cybsp_init();
+/* Invalidate stale D-Cache lines from boot window */
+SCB_InvalidateDCache_by_Addr((void *)IPC_SHARED_BASE, IPC_SHARED_SIZE);
+```
+
+Without this, IPC reads return stale/zero data intermittently. This is the #1 cause of "IPC works sometimes" bugs on PSOC Edge dual-core projects.
+
 ## Step 5: Shared Memory Configuration
 
 For IPC data exchange, use the `/ipc-patterns` skill. The shared memory section must be defined in both cores' linker scripts at the same physical address.
+
+### IPC Command Routing: Pre-Framework vs. Post-Framework
+
+IPC poll tasks on the receiver core start processing commands as soon as boot completes. But application frameworks (Matter, WiFi manager, MQTT client) may not be initialized yet.
+
+**Pattern:** Route framework-dependent IPC commands through the application's event queue, not directly in the IPC poll task:
+- **Immediate commands** (local state queries, LED control): Execute directly in IPC handler
+- **Deferred commands** (Matter attribute writes, WiFi state changes): Post to app event queue; app task processes when framework is ready
+
+This prevents crashes or silent data corruption when IPC commands arrive during framework initialization.
 
 ---
 

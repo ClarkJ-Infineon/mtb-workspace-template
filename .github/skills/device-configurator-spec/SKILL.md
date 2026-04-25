@@ -50,6 +50,16 @@ If pin aliases (`CYBSP_*`) are not available for the target peripheral, specify 
 
 ---
 
+## Post-Save Verification (Required)
+
+After saving Device Configurator changes, **always verify the generated code**:
+1. Check file timestamps in `bsps/TARGET_*/config/GeneratedSource/` — `cycfg_peripherals.c` and `cycfg_system.c` should have updated timestamps
+2. Open the generated files and confirm values match your intent
+3. Device Configurator has known issues where settings silently revert to defaults on close/reopen
+4. If timestamps didn't change, delete `design.modus.lock` and retry
+
+---
+
 ## Memory Configuration (PSOC Edge E84)
 
 In addition to peripheral configuration, Device Configurator manages **Memory Configuration** — how System SRAM and SOCMEM are partitioned between cores. This is a separate personality from peripheral setup.
@@ -98,3 +108,25 @@ Generate a memory configuration spec whenever the project uses capabilities that
 - Provide hex values alongside KB for easy Device Configurator entry
 - Total must match hardware: System SRAM = `0x100000`, SOCMEM = `0x500000`
 - Generated linker scripts in `GeneratedSource/` are updated on save — never edit manually
+
+---
+
+## MPU Region Synchronization (CRITICAL for Dual-Core)
+
+Device Configurator Memory Configuration generates linker script symbols (start addresses and sizes). Corresponding MPU non-cacheable regions must be **manually configured** — Device Configurator does NOT auto-create or auto-sync MPU entries.
+
+After ANY Memory Configurator region change:
+1. Note the new start address and size from Memory Configurator
+2. Open the MPU Configuration panel in Device Configurator
+3. Update the corresponding MPU region's base address and size
+4. Save and verify that `cycfg_system.c` MPU regions match `cymem_CM55_0.h` defines
+
+> **Common trap:** Changing `gfx_mem` size in Memory Configurator but forgetting to update the MPU non-cacheable region → framebuffer writes go through D-Cache → garbled display output.
+
+---
+
+### I2C Clock Configuration for Display Touch Controllers
+
+Many display touch controllers (FT5406, GT911) require Standard mode I2C (~100-200 kHz). Default Fast mode (400 kHz) causes device ID read failures or corrupted touch data.
+
+For the Waveshare 4.3" display: SCB0 I2C, clock divider = 31, `highPhaseDutyCycle = 16` → ~184 kHz SCL. Always verify the I2C clock speed against your display datasheet.

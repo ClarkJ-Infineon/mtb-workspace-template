@@ -120,6 +120,8 @@ Call `init_retarget_io()` **after** `cybsp_init()`.
 
 CM55 on PSOC Edge uses the **same pattern** as CM33. Each core project (`proj_cm33_ns/` and `proj_cm55/`) gets its own `retarget_io_init.c` with the identical 3-step sequence, pointing to its own configured UART SCB.
 
+> **CRITICAL:** CM55 projects MUST call `init_retarget_io()` even if CM33 has already initialized the same UART (SCB2). The retarget-io library uses a per-core FreeRTOS mutex. If CM55 calls `printf()` without having initialized retarget-io, the mutex is uninitialized → FreeRTOS assertion failure → `CY_HALT()` crash. Both cores sharing SCB2 is safe — output interleaves at byte level, which is normal and expected.
+
 > **Note:** If both cores print to the same physical UART simultaneously, output may interleave at the character level. Prefix output with core tags for readability:
 >
 > ```c
@@ -143,6 +145,14 @@ If printf still produces no output after applying the correct initialization:
 3. **Check baud rate** — must match the Device Configurator UART settings (typically 115200)
 4. **Call order** — `cybsp_init()` must complete before `init_retarget_io()`
 5. **Correct core project** — ensure each core's Makefile includes its own source files
+
+---
+
+## Matter SDK Logging Impact
+
+On Matter projects, the CHIP SDK's `CHIP_DETAIL_LOGGING` generates thousands of log lines during commissioning. This floods the shared UART and can stall CM55's LVGL frame updates.
+
+**Fix:** Edit `mtb_shared/connectedhomeip/src/core/CHIPBuildConfig.h` directly and set `CHIP_DETAIL_LOGGING` to 0. Project Makefile `DEFINES` do NOT override this — the SDK header is included after project config and unconditionally redefines the macro. You must take library ownership (`make modlibs`) to preserve the edit across `make getlibs`.
 
 ---
 

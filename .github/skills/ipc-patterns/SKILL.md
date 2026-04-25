@@ -148,6 +148,8 @@ void ipc_receiver_task(void *arg)
 - If queue is full, `mtb_ipc_send()` returns `CY_RSLT_IPC_QUEUE_FULL`
 - **Never** block CM55 DSP pipeline on IPC send — skip or buffer locally
 
+> **Queue depth:** The built-in IPC message queue has a fixed 8-entry depth. If the sender generates commands faster than the receiver processes them, `mtb_ipc_send()` returns `CY_RSLT_IPC_QUEUE_FULL` and the command is lost. For applications where the final value matters more than every intermediate value (e.g., thermostat setpoint adjustments), this is acceptable — only the last value needs to arrive. For applications requiring guaranteed delivery (motor control, audio streaming), use Pattern 3 (Ring Buffer) with a larger capacity.
+
 ---
 
 ## Pattern 3: Ring Buffer over Shared Memory
@@ -227,3 +229,51 @@ bool ring_read(ring_entry_t *entry)
 | Periodic sensor readings | Semaphore-Guarded Shared Mem | Medium | Medium |
 | Streaming data (radar, audio) | Ring Buffer | High | Higher |
 | One-time boot synchronization | IPC Boot Handshake (see /dual-core-setup skill) | N/A | Low |
+
+---
+
+## IPC Command Routing: Pre-Framework vs. Post-Framework
+
+IPC poll tasks start processing commands as soon as boot completes, but application frameworks (Matter, WiFi manager, MQTT) may not be initialized yet. Commands that depend on these frameworks will crash or silently corrupt state.
+
+**Two-tier routing pattern:**
+- **Immediate commands:** Local state queries, LED control, sensor reads — execute directly in the IPC handler callback
+- **Deferred commands:** Matter attribute writes, WiFi state changes, MQTT publishes — post to the application's FreeRTOS event queue; the app task processes them after framework initialization is complete
+
+```c
+void ipc_handler(uint32_t cmd, const void *data) {
+    switch (cmd) {
+        case CMD_GET_SENSOR:    // Immediate — no framework dependency
+            handle_sensor_query(data);
+            break;
+        case CMD_SET_SETPOINT:  // Deferred — needs application stack
+            app_event_t evt = { .type = EVT_IPC_SETPOINT, .data = *(int16_t *)data };
+            xQueueSend(app_event_queue, &evt, 0);
+            break;
+    }
+}
+```
+
+---
+
+## Producer Timeout / Stale Data Detection
+
+When one core publishes data periodically (e.g., CM55 publishes sensor readings every 2 seconds), the consumer should detect when the producer stops updating:
+
+```c
+// Producer side (CM55): increment sequence counter on every update
+shared->sensor_seq++;
+shared->temperature = new_value;
+SCB_CleanDCache_by_Addr(shared, sizeof(*shared));
+
+// Consumer side (CM33): detect stale data
+static uint32_t last_seq = 0;
+static TickType_t last_update = 0;
+if (shared->sensor_seq != last_seq) {
+    last_seq = shared->sensor_seq;
+    last_update = xTaskGetTickCount();
+    use_temperature(shared->temperature);
+} else if (xTaskGetTickCount() - last_update > pdMS_TO_TICKS(30000)) {
+    mark_sensor_stale();
+}
+```

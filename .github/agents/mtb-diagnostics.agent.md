@@ -63,7 +63,63 @@ Work through in order — most MTB build failures fall into one of these categor
 **Symptoms:** Dozens of undefined symbols (`GFXSS_Type`, `CYBSP_*`), missing `$(SEARCH_*)` variables.
 **Fix:** Use `project-creator-cli` (see `mtb-project` agent). Manual assembly is not supported.
 
+### 10. Unnecessary manual SOURCES/INCLUDES for auto-discovered libraries
+**Symptoms:** Duplicate symbol errors; linker conflicts between two versions of the same library; or assuming a library "doesn't integrate" when it actually does.
+**Root cause:** Libraries with `props.json` (modern format) ARE auto-discovered by the MTB build system — they do NOT need manual `SOURCES+=` or `INCLUDES+=`. This is a common misdiagnosis when:
+- Two versions of a library exist in `mtb_shared/` (e.g., `kv-store/release-v1.1.1` AND `kv-store/release-v2.2.0`)
+- The build system finds the wrong version first
+- The developer concludes auto-discovery is "broken" and adds manual paths, masking the real issue
+**Check:** Does the library directory contain `props.json`? If yes, it auto-discovers.
+**Fix:** Remove manual SOURCES/INCLUDES. Rename conflicting old versions to `.disabled`. Delete `build/` and rebuild.
+**Reference:** `mtb-example-psoc-edge-btstack-hello-sensor` uses `kv-store` + `block-storage` with zero manual overrides.
+
+### 11. Missing `extern "C"` guards in Infineon library headers (C++ projects)
+**Symptoms:** `undefined reference` to a function that clearly exists in a `.c` file; linker shows C++ mangled name but the implementation is C.
+**Root cause:** Some Infineon library headers lack `extern "C"` guards. This is invisible in C projects but causes link failures when included from C++ (`.cpp`) files. Known affected headers:
+- `mtb_block_storage.h` (block-storage)
+- `cyabs_rtos_hal_impl.h` (abstraction-rtos)
+**Fix:** Add `#ifdef __cplusplus` / `extern "C" {` / `#endif` guards to the affected header. Or wrap the `#include` in `extern "C" { ... }` in your C++ source.
+**Prevention:** When porting C projects to C++, test-compile early to catch linkage issues before they cascade.
+**Permanent fix:** Take local ownership of the affected library (see `mtb-project` agent, Part 2B) so the patch survives `make getlibs`.
+
+### 12. `make getlibs` overwrites local modifications in `mtb_shared/`
+**Symptoms:** A fix you applied to a library header or source file in `mtb_shared/` disappears after running `make getlibs`. Build errors return that were previously fixed.
+**Root cause:** `make getlibs` re-downloads and overwrites all libraries in `mtb_shared/` from their upstream repos. Any hand-edits are silently destroyed.
+**Check:** Did you modify any file under `mtb_shared/` directly?
+**Fix:** Take local ownership of the library — copy it into `proj_cm33_ns/libs/<library>/`, delete `.git`, add a `.cyignore` entry to exclude the `mtb_shared` original. See `mtb-project` agent, Part 2B for the full process.
+**Reference:** [Infineon KBA — Modifying a ModusToolbox Library](https://community.infineon.com/t5/Knowledge-Base-Articles/Modifying-a-ModusToolbox-library/ta-p/796512)
+
+### 13. LwIP errno C++ compilation failures with `LWIP_STATS=1`
+**Symptoms:** C++ compile errors in `error_constants.h`, `<mutex>`, or similar standard headers with undefined POSIX errno symbols like `EAFNOSUPPORT`, `EPROTOTYPE` when `LWIP_STATS` is enabled.
+**Root cause:** `LWIP_ERRNO_STDINCLUDE` (default in matter-wifi's `lwipopts.h`) pulls in system errno headers. When `LWIP_STATS=1` activates more LwIP code paths, these headers are included in C++ translation units where newlib-nano doesn't provide all POSIX errno symbols.
+**Fix:** Create a project-local `configs/lwipopts.h` that overrides: `#undef LWIP_ERRNO_STDINCLUDE` / `#define LWIP_ERRNO_STDINCLUDE 0` / `#define LWIP_PROVIDE_ERRNO 1`. This lets LwIP supply its own errno definitions.
+**Note:** This fix is needed even without `LWIP_STATS` if any LwIP header path triggers the errno inclusion in C++ files.
+
+### 14. `PacketBuffer: pool EMPTY` crash after 30-120 seconds (Matter on cat1d)
+**Symptoms:** Device runs normally for 30-120 seconds after Matter server init, then crashes with `PacketBuffer: pool EMPTY`, `pbuf_free: p->ref > 0`, garbled serial output, or memory corruption.
+**Root cause:** On cat1d, `CHIP_SYSTEM_CONFIG_USE_LWIP=1` — Matter PacketBuffers ARE LwIP pbufs. The default `PBUF_POOL_SIZE=48` is exhausted by mDNS advertising bursts (peak observed: 45/48 pbufs). This is a burst problem, NOT a leak — pbufs return to 0 between bursts.
+**Fix:** Increase `PBUF_POOL_SIZE` to 64 in a project-local `configs/lwipopts.h`. Each additional pbuf costs ~1580 bytes BSS. +16 pbufs = ~26KB. See `mtb-matter` agent for full lwipopts.h template.
+**Diagnostics:** Enable `LWIP_STATS=1` and monitor `lwip_stats.memp[MEMP_PBUF_POOL]->used/max/err` via a periodic FreeRTOS task.
+
 **After diagnosis, provide:** Root cause (one sentence) → Fix (exact change) → Verification (expected build output).
+
+### 15. CHIP SDK logging floods UART, stalls CM55 (dual-core Matter projects)
+**Symptoms:** CM55 main loop freezes or produces large output gaps during Matter commissioning or subscription reports. UI becomes unresponsive. Serial output shows thousands of `CHIP:DMG`, `CHIP:IN`, `CHIP:SC` lines with no CM55 output between them.
+**Root cause:** `CHIP_DETAIL_LOGGING=1` (default in `CHIPBuildConfig.h`) generates verbose logging on CM33 that monopolizes the shared UART. CM55's `printf()` blocks waiting for UART access, stalling the LVGL main loop and IPC polling.
+**Diagnosis:** Check if CM55 output gaps correlate with CM33 commissioning phases. Look for 1000+ consecutive `[CHIP:...]` lines without any `[CM55]` output.
+**Fix:** Edit `CHIPBuildConfig.h` directly in the matter-wifi SDK to set `CHIP_DETAIL_LOGGING 0` and `CHIP_AUTOMATION_LOGGING 0`. Project-level overrides via `CHIPProjectConfig.h` do NOT work — the SDK header redefines these macros unconditionally after the project config is included.
+**⚠️ Warning:** `make getlibs` will overwrite this edit. Take local ownership of the matter library (see `mtb-project` agent, Part 2B) to make the fix permanent.
+
+### 16. Serial output interleaving between cores is NORMAL
+**Symptoms:** Garbled serial output mixing `[CM33]` and `[CM55]` log lines, half-lines visible, character-level corruption.
+**Important:** This is NORMAL shared-UART behavior, NOT an IPC data corruption bug. Both cores write to the same physical UART (SCB2) without byte-level synchronization. Character-level interleaving is expected and harmless.
+**What to do:** Prefix all log lines with core tags (`[CM33]`/`[CM55]`). Accept that lines may interleave. Do NOT investigate as a data corruption or IPC issue. For clean output, use the IPC ring buffer printf relay (see `mtb-multicore` agent, Part 5).
+
+### 17. D-Cache boot-time stale reads on CM55
+**Symptoms:** IPC reads return initial (zero/default) values despite CM33 writing correct data. Issue appears only in the first few hundred milliseconds after boot and may be intermittent.
+**Root cause:** CM55's D-Cache is enabled in `Reset_Handler()` before `main()` runs. MPU non-cacheable regions are not configured until `cybsp_init()`. Stale cache lines from boot persist after MPU reconfiguration.
+**Diagnosis:** Add raw-value logging to IPC reads at boot. If `magic` and `sequence` fields are zero but CM33 is publishing, this is the D-Cache boot-time window.
+**Fix:** Add `SCB_InvalidateDCache_by_Addr()` immediately after `cybsp_init()` in CM55. See `mtb-multicore` agent, Part 1 "Boot-Time D-Cache Invalidation".
 
 ---
 

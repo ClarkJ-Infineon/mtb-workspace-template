@@ -71,6 +71,25 @@ Read `CONTEXT.md` first to confirm the target device family, kit, and toolchain 
 **Check:** Verify actual clock frequencies from `bsps/TARGET_*/config/GeneratedSource/cycfg_clocks.c` — search for `desiredFrequency` and `CLKHF` defines. CM55 may be at 400 MHz, not 240 MHz as sometimes documented.
 **Fix:** Adjust peripheral clock dividers in Device Configurator → Clocks tab, or update application code to use the correct frequency constants.
 
+### 12. Device Configurator changes silently lost?
+**Symptoms:** You save changes in Device Configurator but the generated code doesn't reflect them; peripheral behavior unchanged after rebuild.
+**Check:** Look for a stale `design.modus.lock` file in the BSP config directory.
+**Fix:** Delete `design.modus.lock`, reopen Device Configurator, and retry. Verify the `.modus` file modification timestamp actually changes after saving.
+
+### 13. Memory Configurator rejects region resize with overlap error?
+**Symptoms:** Memory Configurator shows overlap error when resizing a memory region, even though the final layout is valid.
+**Fix:** Resize in two save cycles: (1) shrink the donor region and save, (2) grow the target region and save. The tool validates intermediate states — you cannot shrink and grow in a single operation if the intermediate state would cause overlap.
+
+### 14. IPC data corruption or D-Cache coherency bugs after memory rebalancing?
+**Symptoms:** IPC returns stale/zero data; shared memory corruption appears only after Memory Configurator changes.
+**Check:** Compare MPU regions in the generated `cycfg_system.c` against the new memory layout in `cymem_CM55_0.h` (or `cymem_CM33_0.h`).
+**Fix:** Manually verify that every MPU region start address and size matches the Memory Configurator output. Device Configurator does NOT auto-sync MPU addresses with Memory Configurator — this is a known limitation.
+
+### 15. Build fails with warnings treated as errors?
+**Symptoms:** Compiler warnings (`-Wunused-variable`, `-Wimplicit-int-conversion`, etc.) cause build failure.
+**Check:** Matter SDK projects and some Infineon templates enable `-Werror`. Check project and library Makefiles for `CFLAGS += -Werror`.
+**Fix:** Fix ALL compiler warnings — unused variables, implicit type conversions, missing return statements all become fatal under `-Werror`. Do not remove the flag; fix the code.
+
 ---
 
 After identifying the root cause, provide:

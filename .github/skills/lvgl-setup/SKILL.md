@@ -13,6 +13,8 @@ The recommended approach is to start from the **Infineon LVGL demo CE** (`mtb-ex
 
 If adding LVGL to an existing project, copy the `bsps/` directory (specifically `design.modus` and generated source) from a working LVGL demo built for the same BSP.
 
+> **Adding LVGL to an existing project:** When your project already has WiFi, BLE, Matter, or sensor configurations in `design.modus`, do NOT replace the entire file with the LVGL demo's `design.modus` — you would lose all existing peripheral configs. Instead, open both projects in Device Configurator side-by-side and manually add the GFXSS personality, I2C touch controller, and clock settings to your existing configuration. See the `mtb-display` agent §10b for a validated 13-step workflow.
+
 ---
 
 ## 1. Display Hardware Options
@@ -225,6 +227,8 @@ These contain Infineon-specific adaptations for the GFXSS hardware. **Do NOT wri
 
 ## 8. Initialization Sequence (order matters)
 
+> **CRITICAL — FreeRTOS Stack Sizing:** Set `configMINIMAL_STACK_SIZE = 512` (32 KB) in CM55's `FreeRTOSConfig.h`. Non-graphics PSOC Edge projects typically default to 128 (1 KB), which causes immediate stack overflow when LVGL initializes. Stack overflow manifests as HardFault with no useful backtrace. Also set `configENABLE_MVE = 1` for Helium/MVE SIMD register preservation during context switches — VG-Lite uses MVE instructions.
+
 ### `main()` — before FreeRTOS scheduler
 
 ```
@@ -234,6 +238,15 @@ These contain Infineon-specific adaptations for the GFXSS hardware. **Do NOT wri
 4. xTaskCreate(cm55_gfx_task, "GFX", 8192, ...)
 5. vTaskStartScheduler()
 ```
+
+> **Boot-time D-Cache invalidation:** After `cybsp_init()` in CM55 `main.c`, invalidate D-Cache for BOTH the IPC shared memory region AND the `gfx_mem` framebuffer region. Stale cache lines from the boot window (before MPU configured non-cacheable regions) persist and cause garbled display output or IPC corruption:
+>
+> ```c
+> cybsp_init();
+> SCB_InvalidateDCache_by_Addr((void *)IPC_SHARED_BASE, IPC_SHARED_SIZE);
+> SCB_InvalidateDCache_by_Addr((void *)GFX_MEM_BASE, GFX_MEM_SIZE);
+> init_retarget_io();
+> ```
 
 ### `cm55_gfx_task()` — inside FreeRTOS context
 
@@ -252,6 +265,16 @@ These contain Infineon-specific adaptations for the GFXSS hardware. **Do NOT wri
 12. your_ui_create()             ← Your UI
 13. Loop: lv_timer_handler()     ← LVGL main loop (clamp delay ≥ 1ms)
 ```
+
+### Sensor Migration (Shared I2C Bus)
+
+If your existing project has sensors on the same SCB as the display touch controller (typically SCB0), only one core can own that SCB. To resolve:
+1. Remove sensor initialization from CM33 code
+2. Add sensor driver to CM55 — initialize on the same SCB after display/touch I2C init
+3. Publish sensor readings via IPC shared memory back to CM33
+4. Add stale-data timeout on CM33 (if CM55 stops publishing, use last-known value)
+
+> **I2C SDA stuck LOW:** If the display or sensor leaves SDA low at boot (common after power glitches), I2C init fails. Implement bus recovery by configuring SCL as GPIO and toggling 9 clock cycles before I2C init.
 
 ---
 
@@ -303,6 +326,8 @@ The **Memory Configuration** personality in `design.modus` controls how SOCMEM i
 |---|---|---|
 | `gfx_mem` too small | Display corruption, partial rendering | Grow `gfx_mem`, shrink `m55_data_secondary` |
 | CM33 data overflow (WiFi+MQTT) | Linker error: `.data`/`.bss` overflow | Shrink `m33_code`, grow `m33_data` in System SRAM |
+
+> **Resize ordering:** When rebalancing memory regions (e.g., shrinking `m55_data_secondary` to grow `gfx_mem`), always shrink first and save, then grow and save again. The Memory Configurator validates intermediate states — attempting both changes simultaneously causes overlap rejection errors.
 
 ---
 
