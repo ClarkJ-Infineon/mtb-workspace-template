@@ -119,6 +119,72 @@ cy_rslt_t wifi_connect(void)
 
 ---
 
+# Part 2B: PSOC Edge WiFi — Platform-Specific Requirements
+
+> **Applies to:** PSOC Edge E84 only. PSOC 6 does not need these steps.
+
+## SDIO Initialization Before cy_wcm_init()
+
+On PSOC 6, `cy_wcm_init()` handles WiFi hardware init internally. **On PSOC Edge E84, the SDIO bus to the CYW55500 radio must be explicitly initialized first.** Without it, `cy_wcm_init()` hangs indefinitely.
+
+**Critical ordering:**
+```c
+/* 1. Zero the config struct FIRST */
+cy_wcm_config_t wcm_config;
+memset(&wcm_config, 0, sizeof(wcm_config));
+wcm_config.interface = CY_WCM_INTERFACE_TYPE_STA;
+
+/* 2. Initialize SDIO bus to the radio */
+app_sdio_init();  /* Sets up SDIO HAL, GPIO pins, interrupt handlers */
+
+/* 3. Pass the SDIO instance to WCM */
+wcm_config.wifi_interface_instance = &sdio_instance;
+
+/* 4. NOW init WCM */
+cy_rslt_t result = cy_wcm_init(&wcm_config);
+```
+
+Copy the `app_sdio_init()` pattern from a working WiFi example (e.g., `wifi_task.c` in `mtb-example-psoc-edge-btstack-wifi-onboarding`).
+
+## CYW55500 Reset Override
+
+The CYW55500 radio requires a different reset sequence than CYW43xxx. Override the weak BSP function:
+
+```c
+void _cybsp_wifi_reset_wifi_chip(void)
+{
+    cyhal_gpio_write(CYBSP_WIFI_WL_REG_ON, 0);
+    Cy_SysLib_Delay(10);
+    cyhal_gpio_write(CYBSP_WIFI_WL_REG_ON, 1);
+    Cy_SysLib_Delay(50);  /* CYW55500 needs 50ms settling */
+}
+```
+
+## FreeRTOS Heap for WiFi + MQTT + TLS
+
+The default `configTOTAL_HEAP_SIZE` of 64 KB is **not enough** for WiFi + MQTT + TLS on CM33. Minimum 128 KB required:
+
+| Component | Approx Heap |
+|-----------|------------|
+| WiFi driver (CYW55500) | ~18 KB |
+| lwIP | ~16 KB |
+| mbedTLS (TLS 1.2) | ~40 KB |
+| MQTT + FreeRTOS overhead | ~18 KB |
+| **Total** | **~92 KB** |
+
+```c
+/* FreeRTOSConfig.h */
+#define configTOTAL_HEAP_SIZE    ((size_t)(128 * 1024))
+```
+
+**Failure mode:** `pvPortMalloc()` returns NULL during TLS handshake → mbedTLS dereferences null → HardFault. Non-obvious.
+
+## SRAM Partitioning for Heavy Connectivity Stacks
+
+Default Device Configurator gives CM33 256 KB data SRAM. WiFi + MQTT + TLS + BLE can push utilization to 98%. If WiFi buffer allocation fails intermittently, increase CM33 data SRAM to at least 384–512 KB via Device Configurator Memory Configuration.
+
+---
+
 # Part 3: MQTT Connection + Publish/Subscribe
 
 ## MQTT Connect + Publish
@@ -354,3 +420,6 @@ void network_monitor_task(void *arg)
 | Stack-allocated response buffer | Stack overflow > 2 KB | Use pvPortMalloc() |
 | DNS failure after WiFi reconnect | Transient gethostbyname failures | Retry with backoff |
 | Publishing faster than TLS can encrypt | MQTT queue backlog, disconnect | Rate-limit (1-2/sec typical) |
+| PSOC Edge: missing SDIO init before `cy_wcm_init()` | `cy_wcm_init()` hangs indefinitely | See Part 2B — init SDIO HAL first |
+| MQTT reconnect without disconnect first | Error `0x08060009` (stale socket) | Call `cy_mqtt_disconnect()` before `cy_mqtt_connect()` even after broker-initiated disconnect |
+| FreeRTOS heap too small for WiFi + TLS | HardFault during TLS handshake | `configTOTAL_HEAP_SIZE` ≥ 128 KB |

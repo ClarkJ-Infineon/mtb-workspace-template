@@ -121,6 +121,46 @@ Work through in order — most MTB build failures fall into one of these categor
 **Diagnosis:** Add raw-value logging to IPC reads at boot. If `magic` and `sequence` fields are zero but CM33 is publishing, this is the D-Cache boot-time window.
 **Fix:** Add `SCB_InvalidateDCache_by_Addr()` immediately after `cybsp_init()` in CM55. See `mtb-multicore` agent, Part 1 "Boot-Time D-Cache Invalidation".
 
+### 18. Printf buffering masks debug location
+**Symptoms:** When debugging a hang, printf output stops at the last `\r\n`-terminated line — NOT at the actual hang point. You misidentify the failing function.
+**Root cause:** Newlib's stdout is line-buffered by default. Partial prints (e.g., `printf("init spi..")`) sit in the buffer until a `\r\n` or `fflush()`.
+**Fix:** Disable buffering immediately after UART init:
+```c
+init_retarget_io();
+setvbuf(stdout, NULL, _IONBF, 0);  /* Unbuffered — every char appears immediately */
+```
+**When to use:** Always during bring-up and debugging. Remove for production (unbuffered printf is slower).
+
+### 19. Device Configurator silent failures
+**Symptoms:** Device Configurator appears to save successfully but generated source doesn't change, or saved values revert to defaults after close/reopen.
+**Known failure modes:**
+
+| Issue | Symptom | Prevention |
+|-------|---------|------------|
+| `.lock` file present | Save succeeds silently but writes nothing | Delete `design.modus.lock` before editing |
+| MPU ↔ Memory Configurator desync | MPU region addresses don't match memory layout after resize | Manually verify MPU regions after any Memory Configurator change |
+| Shrink-before-grow rule | Rejects intermediate states where regions overlap | Shrink donor region first, save, THEN grow target |
+| Settings revert on close/reopen | Saved values silently revert to defaults | After every save, verify the generated `.c` file |
+
+**Mitigation workflow:** Close all instances → delete `.lock` → make changes → save → **open generated `.c` file and verify values** → if wrong, close/reopen/re-enter.
+
+### 20. WDT reset ~2 seconds after boot (no serial output)
+**Symptoms:** Board appears to program successfully but produces no serial output. Board resets every ~2 seconds.
+**Root cause:** Secure boot enables the watchdog timer. Application code must either service or disable it.
+**Fix:** Add immediately after `cybsp_init()`:
+```c
+cybsp_init();
+Cy_WDT_Disable();  /* Disable WDT for development */
+```
+**Differentiation:** WDT reset has NO serial output at all (resets before UART init). FreeRTOS tickless idle crash (item 21) produces some output before crashing.
+
+### 21. FreeRTOS tickless idle HardFault ~2 seconds after boot
+**Symptoms:** Device runs normally for ~2 seconds then HardFaults. Some serial output visible before crash. Timing suggests a watchdog but WDT is disabled.
+**Root cause:** Default `configUSE_TICKLESS_IDLE=2` calls `vApplicationSleep()` using MCWDT/LPTimer. If LPTimer hardware is not initialized, the first idle task context switch → HardFault.
+**Fix:** Either:
+- Call `setup_tickless_idle_timer()` in `main()` before `vTaskStartScheduler()`
+- Or add `CY_CFG_PWR_SYS_IDLE_MODE=0` to Makefile DEFINES to disable tickless idle during development
+
 ---
 
 # Part 2: Printf Not Working (PSOC Edge)

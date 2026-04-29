@@ -38,9 +38,13 @@ DEFINES+=configENABLE_MVE=1
 
 # Optimization for DSP workloads
 CFLAGS+=-O2
+
+# CMSIS-DSP FFT lookup tables — WITHOUT these, arm_rfft_fast_init_f32()
+# fails silently or returns ARM_MATH_ARGUMENT_ERROR
+DEFINES+=ARM_DSP_CONFIG_TABLES ARM_FAST_ALLOW_TABLES ARM_FFT_ALLOW_TABLES
 ```
 
-> **Toolchain note:** GCC_ARM (default) supports Helium intrinsics. LLVM may provide better auto-vectorization for some DSP patterns. Both require the MVE arch flag.
+> **Toolchain:** LLVM Embedded Toolchain for Arm produces **1.77× faster** DSP code than GCC ARM for Helium/MVE workloads (217 µs vs 383 µs per radar frame in CE-06 benchmarks). Default to `TOOLCHAIN=LLVM_ARM` in `common_app.mk` for DSP-heavy projects. Always verify correctness with both toolchains and document the GCC fallback. LLVM Debug builds are faster than GCC Release builds.
 
 ---
 
@@ -237,3 +241,48 @@ Helium acceleration comes from CMSIS-DSP auto-vectorization — no explicit intr
 | FFT on every frame without holdoff | IPC queue overflow, CM55 stalls | Send IPC only on state transitions |
 | MTI filter not initialized | First frame produces garbage output | Handle first-frame case explicitly |
 | Sharing FFT buffers between tasks | Race condition, corrupted spectra | Each task gets its own FFT instance |
+
+---
+
+## Known Issues
+
+### sensor-dsp Library Bugs
+
+**`ifx_mti_init_f32()` assert bug:** The function asserts on `inst->historical_data` BEFORE setting it. Workaround: pre-populate struct fields before calling init. Also define `NDEBUG` in production Makefiles.
+
+**`ifx_doppler_cfft_f32()` hang on CM33:** This function hangs on first invocation when running on Cortex-M33 (scalar CMSIS-DSP, not Helium). Workaround: run Doppler FFT on CM55 only, or disable it on CM33.
+
+### SPI ISR Registration for Radar
+
+`Cy_SCB_SPI_Transfer()` is interrupt-driven. Without a registered ISR → infinite hang:
+
+```c
+cy_stc_sysint_t spi_irq_cfg = {
+    .intrSrc = CYBSP_SPI_CONTROLLER_IRQ,
+    .intrPriority = 3
+};
+Cy_SysInt_Init(&spi_irq_cfg, spi_isr);
+NVIC_EnableIRQ(CYBSP_SPI_CONTROLLER_IRQ);
+```
+
+**Alternative:** Use polling SPI (`Cy_SCB_SPI_Write`/`Cy_SCB_SPI_Read`) — simpler, no ISR needed, works fine at radar frame rates.
+
+### Custom PDL HAL for PSOC Edge
+
+The standard `xensiv_bgt60trxx_mtb.c` radar HAL depends on `cyhal_*` APIs not available on PSOC Edge. Write a custom HAL using PDL: `Cy_SCB_SPI_*` for SPI, `Cy_GPIO_*` for GPIO, `Cy_SysLib_Delay*` for timing. Guard with `#ifdef COMPONENT_MTB_HAL`.
+
+### Threshold Tuning Methodology
+
+Never carry forward threshold values from a different radar configuration. Tuning process:
+1. Log raw energy values over extended sessions on hardware
+2. Identify signal ranges per scenario (empty room, breathing, walking)
+3. Set thresholds with margin above noise floor
+4. Define thresholds in ONE place only — use asserts for uninitialized values
+
+Measured energy ranges (CE-06, 128 samples × 16 chirps):
+
+| Scenario | Macro Energy | Micro Energy |
+|----------|-------------|-------------|
+| Empty room | 0.00–0.02 | 0.00–0.04 |
+| Breathing at 1m | 0.01–0.05 | 0.06–0.55 |
+| Walking at 2m | 1.50–6.00 | 0.02–0.15 |

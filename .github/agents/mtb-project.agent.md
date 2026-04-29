@@ -79,6 +79,71 @@ git clone <ce-template-repo> && make getlibs && make build   # FAILS
 
 ---
 
+# Part 1B: PSOC Edge Build System Rules
+
+> **Applies to:** PSOC Edge E84 multi-core projects only.
+
+## Build Invocation Point
+
+**Always build from `proj_cm33_ns/`** — not from the top-level directory:
+
+```bash
+cd proj_cm33_ns
+make getlibs -j8    # One-time: resolve dependencies
+make build -j8      # Builds all three sub-projects → app_combined.hex
+make program -j8    # Flash via KitProg3
+```
+
+The top-level Makefile exists for IDE integration (Eclipse project import) only. Running `make build` from the top level does NOT produce the combined hex. Building from `proj_cm33_ns/` triggers the correct dependency chain: `proj_cm33_s` → `proj_cm55` → `proj_cm33_ns` → link → program.
+
+## common_app.mk — Shared Variables Only
+
+`common_app.mk` sets variables that ALL THREE sub-projects inherit. **Only put truly shared variables here:**
+
+```makefile
+# common_app.mk — correct: shared across all cores
+TOOLCHAIN=LLVM_ARM
+CONFIG=Release
+TARGET=APP_KIT_PSE84_EVAL_EPC2
+CY_COMPILER_LLVM_ARM_DIR=C:/llvm-arm/19.1.5
+```
+
+**Core-specific COMPONENTS and DEFINES go in the per-project Makefile:**
+
+```makefile
+# proj_cm33_ns/Makefile — CM33-specific
+COMPONENTS+=FREERTOS LWIP MBEDTLS
+DEFINES+=CY_RETARGET_IO_CONVERT_LF_TO_CRLF
+
+# proj_cm55/Makefile — CM55-specific
+COMPONENTS+=CMSIS_DSP
+DEFINES+=ARM_MATH_MVEF ARM_MATH_HELIUM configENABLE_MVE=1
+```
+
+**Exception:** `COMPONENTS+=GFXSS` must go in `common_app.mk` when using the display — the generated GFXSS structs are in shared BSP code that all projects compile.
+
+**Anti-pattern:** Adding `CMSIS_DSP` to `common_app.mk` causes CM33 to compile MVE intrinsics → hundreds of errors.
+
+## TARGET Name Must Include APP_ Prefix
+
+BSP directory names include an `APP_` prefix. The `TARGET=` variable must match:
+
+```makefile
+# ✅ Correct
+TARGET=APP_KIT_PSE84_EVAL_EPC2
+
+# ❌ Wrong — build silently finds no BSP
+TARGET=KIT_PSE84_EVAL_EPC2
+```
+
+## Edit BSP Config in templates/, Not libs/
+
+The `templates/` folder stores non-default BSP configuration overrides. When `make getlibs` runs, these override the BSP defaults.
+
+**Trap:** Editing BSP configuration via Device Configurator writes to `libs/TARGET_*/` — NOT to `templates/`. On the next `make getlibs` or clean checkout, your changes are silently overwritten. **Always edit the version in `templates/` and regenerate.**
+
+---
+
 # Part 2: Adding Library Dependencies
 
 ## Step-by-Step Workflow
