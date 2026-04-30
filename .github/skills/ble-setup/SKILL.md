@@ -205,3 +205,90 @@ void app_scan_result_callback(wiced_bt_ble_scan_results_t *p_scan_result,
 | Not calling `wiced_bt_gatt_register` before `gatt_db_init` | GATT callbacks never fire | Register callback in `BTM_ENABLED_EVT` handler |
 | Not restarting advertising on disconnect | Device becomes invisible after first connection | Call `app_start_advertising()` in disconnect handler |
 | Using deprecated BTSTACK v3 API | Compilation errors on newer BSPs | Use `wiced_bt_*` v4 API (check btstack-integration README) |
+
+---
+
+## BLE Central — GATT Client (Connect + Subscribe to Notifications)
+
+> For combo radio kits (CYW55xxx on PSOC Edge), BLE HCI transport is only available AFTER `cy_wcm_init()` loads the shared radio firmware. See `mtb-connectivity` agent Part 7 for the WiFi/BLE coexistence pattern.
+
+### GATT Event Handler — Discovery + Notification Subscribe
+
+```c
+static wiced_bt_gatt_status_t gatt_callback(wiced_bt_gatt_evt_t event,
+                                             wiced_bt_gatt_event_data_t *p_data)
+{
+    switch (event) {
+    case GATT_CONNECTION_STATUS_EVT:
+        if (p_data->connection_status.connected) {
+            conn_id = p_data->connection_status.conn_id;
+            wiced_bt_gatt_client_send_discover(conn_id,
+                GATT_DISCOVER_SERVICES_ALL, NULL);
+        } else {
+            conn_id = 0;
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            wiced_bt_ble_scan(BTM_BLE_SCAN_TYPE_HIGH_DUTY, true, scan_result_cb);
+        }
+        break;
+    case GATT_DISCOVERY_RESULT_EVT:
+        handle_discovery_result(p_data);
+        break;
+    case GATT_DISCOVERY_CPLT_EVT:
+        handle_discovery_complete(p_data);
+        break;
+    case GATT_OPERATION_CPLT_EVT:
+        if (p_data->operation_complete.op == GATTC_OPTYPE_NOTIFICATION)
+            handle_notification(p_data);
+        break;
+    default:
+        break;
+    }
+    return WICED_BT_GATT_SUCCESS;
+}
+```
+
+### 128-bit UUID Matching (Little-Endian Byte Order)
+
+BLE stores 128-bit UUIDs in **little-endian** byte order. Reverse the UUID from specs/phone apps:
+
+```c
+/* UUID from spec: 3950866D-BE3F-4810-8C78-999E9E58A3A6
+ * Stored little-endian for btstack: */
+static const uint8_t TARGET_CHAR_UUID_128[] = {
+    0xA6, 0xA3, 0x58, 0x9E, 0x9E, 0x99, 0x78, 0x8C,
+    0x10, 0x48, 0x3F, 0xBE, 0x6D, 0x86, 0x50, 0x39
+};
+```
+
+> ⚠️ **Do NOT use "first characteristic with NOTIFY property"** — always match by exact UUID.
+
+### Enabling Notifications — Static CCCD Write Buffer (CRITICAL)
+
+```c
+void enable_notifications(uint16_t conn_id, uint16_t cccd_handle)
+{
+    /* MUST be static — btstack reads asynchronously after function returns */
+    static uint8_t cccd_val[] = { GATT_CLIENT_CONFIG_NOTIFICATION & 0xFF,
+                                   (GATT_CLIENT_CONFIG_NOTIFICATION >> 8) & 0xFF };
+    static wiced_bt_gatt_write_hdr_t write_hdr;
+
+    write_hdr.handle   = cccd_handle;
+    write_hdr.offset   = 0;
+    write_hdr.len      = 2;
+    write_hdr.auth_req = GATT_AUTH_REQ_NONE;
+
+    wiced_bt_gatt_client_send_write(conn_id, GATT_REQ_WRITE, &write_hdr, cccd_val, NULL);
+}
+```
+
+> ⚠️ **Stack-local CCCD write buffers = silent failure.** Notifications never arrive because btstack reads freed stack memory.
+
+### Common BLE Central Mistakes
+
+| Mistake | Symptom | Fix |
+|---------|---------|-----|
+| Calling `wiced_bt_stack_init()` before radio FW loaded (combo chips) | BLE does nothing | Wait for `cy_wcm_init()` to complete first |
+| Stack-local CCCD write buffer | Write "succeeds" but no notifications | Make `cccd_val[]` and `write_hdr` static |
+| Big-endian UUID comparison | Discovery never matches | Store UUID bytes in little-endian order |
+| No reconnect on disconnect | Device connects once, never recovers | Re-scan after disconnect with delay |
+| FreeRTOS task stack < 4096 for BLE | Stack overflow during GATT operations | Use 4096+ words for BLE task |

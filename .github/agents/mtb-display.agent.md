@@ -217,8 +217,20 @@ CY_SECTION(".cy_gpu_buf") LV_ATTRIBUTE_MEM_ALIGN
 
 static void disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
 {
-    vg_lite_finish();  /* Wait for GPU before swapping */
+    vg_lite_finish();  /* Wait for GPU to complete rendering */
+
+    /* CRITICAL: Drain stale DC interrupt notification.
+     * The DC fires end-of-frame (VSYNC) interrupts continuously while the display
+     * is scanning. If a VSYNC fires during GPU rendering (normal — display keeps
+     * scanning while GPU works), a task notification is queued. Without draining it,
+     * the ulTaskNotifyTake() below returns immediately with the STALE notification
+     * instead of waiting for a FRESH VSYNC after the buffer swap.
+     * Result without drain: buffer displayed before DC latches new address → tearing. */
+    ulTaskNotifyTake(pdTRUE, 0);  /* Non-blocking drain — discard stale notification */
+
     Cy_GFXSS_Set_FrameBuffer((GFXSS_Type*) GFXSS, (uint32_t*) color_p, &gfx_context);
+
+    /* Wait for fresh VSYNC confirming the DC has latched the new buffer address */
     if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY))
         lv_display_flush_ready(disp);
 }
@@ -362,7 +374,7 @@ print xPortGetFreeHeapSize() # FreeRTOS heap (separate from gfx_mem)
 
 ### 9f. Reference: Display Project Memory Layout (4.3" DSI, Dual-Core)
 
-Proven layout from smart-appliance project (CM55 LVGL + CM33 WiFi/MQTT):
+Proven layout for a dual-core project (CM55 LVGL + CM33 WiFi/MQTT):
 
 | Region | Start | Size (hex) | Size (KB) | Purpose |
 |---|---|---|---|---|
@@ -432,8 +444,9 @@ The PSOC Edge E84 GCNANO (ChipID 0x265) has a preference score of 80/255 in LVGL
 3. **`translate_x`/`translate_y` animations** invalidate both old and new positions — minimize the moving area
 4. **`LV_VG_LITE_FLUSH_MAX_COUNT = 0`** enables CPU/GPU parallelism — critical for text-heavy UIs where SW and GPU rendering overlap
 5. **Keep concurrent animations low** — 4-5 simultaneous animations is the practical limit before frame drops
-6. **`shadow_width` on objects with text children** forces SW fallback — use `border_width` + `border_opa` instead for glow effects
+6. **`shadow_width > 0` on ANY animated object is expensive** — even without text children, shadow rendering at 30fps causes frame drops. Use `bg_color` + `bg_opa` on a larger circle/rect instead. Shadows are only acceptable on static (non-animated) objects.
 7. **Prefer LVGL drawing primitives over bitmap assets for animated elements** — arcs, lines, circles, and shapes are GPU-native (VG-Lite renders them directly), resolution-independent, zero asset management, and easier to animate (change draw parameters, not swap bitmaps). Reserve bitmap images for static content like hero images and photos
+8. **Guard periodic refresh callbacks with state caching** — `lv_obj_set_style_*()` ALWAYS marks the object dirty (triggers full-frame re-render in RENDER_MODE_FULL), even if the value hasn't changed. Always cache previous state and skip updates when unchanged (see "Conditional Widget Update Pattern" below)
 
 ### Recommended `lv_conf.h` Tuning (Performance)
 
@@ -448,6 +461,46 @@ The PSOC Edge E84 GCNANO (ChipID 0x265) has a preference score of 80/255 in LVGL
 #define LV_VG_LITE_GRAD_CACHE_CNT   4   /* Increase if using many gradients */
 #define LV_VG_LITE_STROKE_CACHE_CNT 8   /* Increase if using many stroked paths */
 ```
+
+### Conditional Widget Update Pattern (Preventing Unnecessary Redraws)
+
+In `RENDER_MODE_FULL`, ANY dirty widget triggers a complete 800×480 GPU render. Periodic refresh callbacks (e.g., every 500ms to update sensor values) must NOT unconditionally call `lv_label_set_text()` or `lv_obj_set_style_*()` — these always invalidate.
+
+**Helper — only update label if text changed:**
+```c
+static inline void label_set_if_changed(lv_obj_t *label, const char *new_text)
+{
+    const char *cur = lv_label_get_text(label);
+    if (cur == NULL || strcmp(cur, new_text) != 0) {
+        lv_label_set_text(label, new_text);
+    }
+}
+```
+
+**State caching pattern for refresh callbacks:**
+```c
+static int16_t  s_prev_temp  = INT16_MIN;
+static uint8_t  s_prev_mode  = UINT8_MAX;
+static uint16_t s_prev_timer = UINT16_MAX;
+
+static void page_refresh_cb(lv_timer_t *timer)
+{
+    /* Only update widgets when underlying data actually changed */
+    if (g_app_state.temperature != s_prev_temp) {
+        s_prev_temp = g_app_state.temperature;
+        char buf[16];
+        lv_snprintf(buf, sizeof(buf), "%d°C", s_prev_temp);
+        lv_label_set_text(lbl_temp, buf);
+    }
+    if (g_app_state.mode != s_prev_mode) {
+        s_prev_mode = g_app_state.mode;
+        lv_obj_set_style_bg_color(btn_mode, mode_colors[s_prev_mode], LV_PART_MAIN);
+    }
+    /* ... same pattern for all widgets */
+}
+```
+
+> **Rule:** If a value hasn't changed, skip the widget update entirely. This prevents spurious dirty-marking and eliminates unnecessary full-frame renders during idle periods.
 
 ### GCNANO 0x265 Hardware Capabilities (12 of 45 VG-Lite features)
 
@@ -780,6 +833,7 @@ make clean && make -j8 build    # Full rebuild — all three cores
 3. **Missing CY_IGNORE for LVGL originals** → duplicate symbol errors
 4. **4.3" uses 832px width** (not 800) for GPU stride alignment
 5. **`vg_lite_finish()` missing before FB swap** → screen tearing
+6. **Stale DC notification not drained before buffer swap** → `ulTaskNotifyTake()` returns immediately with old VSYNC → buffer displayed before DC latches new address → persistent tearing on continuous animations. Fix: `ulTaskNotifyTake(pdTRUE, 0)` before `Cy_GFXSS_Set_FrameBuffer()` (see §6)
 6. **FreeRTOS heap < 50 KB** → silent crash during `lv_init()`
 7. **`lv_timer_handler()` returns 0** → clamp to 1ms or tasks starve
 8. **FT5406 touch inverted** → invert x/y in read callback

@@ -1,6 +1,6 @@
 ---
 name: mtb-connectivity
-description: Add network connectivity to ModusToolbox projects — WiFi STA, MQTT pub/sub, HTTP client, TLS, library dependency management, JSON parsing, and reconnection strategies. Use for any networking, cloud, IoT, or REST API integration task.
+description: Add network connectivity to ModusToolbox projects — WiFi STA, MQTT pub/sub, HTTP client, TLS, BLE Central (GATT client), library dependency management, JSON parsing, and reconnection strategies. Use for any networking, cloud, IoT, BLE, or REST API integration task.
 tools: ["read", "edit", "create", "search", "shell"]
 ---
 
@@ -42,6 +42,10 @@ You are an expert in adding network connectivity to ModusToolbox™ projects. Yo
    - `mtb://[name]` — manifest-redirected (only for manifest-registered libs)
 
 7. **Run `make getlibs`** after adding all `.mtb` files
+
+8. **Do NOT add manual `SOURCES+=` for libraries with `props.json`** — the MTB build system auto-discovers their sources. Only use manual `SOURCES+=` for custom application files or libraries with non-standard structure. See `mtb-project` agent, "Library Auto-Discovery" section.
+
+9. **If you modify a library, take local ownership** — copy it to `proj_cm33_ns/libs/`, delete `.git`, and add a `.cyignore` entry to exclude the `mtb_shared` original. `make getlibs` overwrites `mtb_shared/` silently. See `mtb-project` agent, Part 2B.
 
 ### Common Dependency Chains
 
@@ -423,3 +427,260 @@ void network_monitor_task(void *arg)
 | PSOC Edge: missing SDIO init before `cy_wcm_init()` | `cy_wcm_init()` hangs indefinitely | See Part 2B — init SDIO HAL first |
 | MQTT reconnect without disconnect first | Error `0x08060009` (stale socket) | Call `cy_mqtt_disconnect()` before `cy_mqtt_connect()` even after broker-initiated disconnect |
 | FreeRTOS heap too small for WiFi + TLS | HardFault during TLS handshake | `configTOTAL_HEAP_SIZE` ≥ 128 KB |
+
+---
+
+# Part 7: BLE Central (GATT Client)
+
+> **Applies to:** PSOC Edge (CM33 NS) with CYW55xxx combo radio (WiFi + BLE shared).
+> **Key constraint:** WiFi and BLE share the same radio firmware on CYW55xxx. BLE HCI transport is only available AFTER the radio firmware is loaded by the WiFi Host Driver (WHD) during `cy_wcm_init()`.
+
+## Required Libraries
+
+Add to `proj_cm33_ns/deps/`:
+
+```
+# btstack-integration.mtb
+https://github.com/Infineon/btstack-integration#latest-v4.X#$$ASSET_REPO$$/btstack-integration/latest-v4.X
+
+# bluetooth-freertos.mtb
+https://github.com/Infineon/bluetooth-freertos#latest-v6.X#$$ASSET_REPO$$/bluetooth-freertos/latest-v6.X
+```
+
+> WiFi libraries (wifi-connection-manager, lwip, etc.) are also required since WHD loads the shared radio firmware.
+
+## Required Makefile Configuration
+
+```makefile
+COMPONENTS+=FREERTOS LWIP MBEDTLS BTSS
+DEFINES+=CYBSP_WIFI_CAPABLE CY_RETARGET_IO_CONVERT_LF_TO_CRLF
+```
+
+## Radio Firmware Sharing — WiFi/BLE Coexistence (CRITICAL)
+
+On CYW55xxx (used by KIT_PSE84_EVAL_EPC2), WiFi and BLE share a single radio chip. The BLE HCI transport layer becomes available only after WHD loads the radio firmware during `cy_wcm_init()`.
+
+**Initialization order:**
+```
+1. cy_wcm_init()          ← loads CYW55xxx firmware (WiFi + BLE combo FW)
+2. Signal BLE task         ← radio firmware ready, HCI transport available
+3. wiced_bt_stack_init()  ← BLE stack initialization (MUST be after step 1)
+```
+
+**Implementation pattern — event-driven readiness:**
+```c
+/* WiFi task signals BLE task after radio FW loads */
+static TaskHandle_t ble_task_handle;
+
+void wifi_task(void *arg)
+{
+    cy_wcm_config_t cfg = { .interface = CY_WCM_INTERFACE_TYPE_STA };
+    cy_wcm_init(&cfg);   /* Radio FW loaded here */
+
+    /* Signal BLE task that HCI transport is ready */
+    xTaskNotifyGive(ble_task_handle);
+
+    /* Continue with WiFi connect... */
+    wifi_connect();
+}
+
+void ble_task(void *arg)
+{
+    printf("[BLE] Waiting for radio firmware...\n");
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  /* Block until WiFi loads FW */
+    printf("[BLE] Radio ready, initializing btstack\n");
+
+    wiced_bt_stack_init(bt_management_callback, &wiced_bt_cfg_settings);
+    /* ... */
+}
+```
+
+> ⚠️ Calling `wiced_bt_stack_init()` BEFORE `cy_wcm_init()` returns → undefined behavior (HCI transport not initialized). This is the #1 cause of "BLE does nothing" on combo radio kits.
+
+## BLE Central — Scan, Connect, Discover, Subscribe
+
+### Management Callback Structure
+
+```c
+wiced_result_t bt_management_callback(wiced_bt_management_evt_t event,
+                                       wiced_bt_management_evt_data_t *p_event_data)
+{
+    switch (event) {
+    case BTM_ENABLED_EVT:
+        if (p_event_data->enabled.status == WICED_BT_SUCCESS) {
+            /* Stack is up — start scanning */
+            wiced_bt_ble_scan(BTM_BLE_SCAN_TYPE_HIGH_DUTY, true, scan_result_cb);
+        }
+        break;
+    case BTM_BLE_SCAN_STATE_CHANGED_EVT:
+        break;
+    default:
+        break;
+    }
+    return WICED_BT_SUCCESS;
+}
+```
+
+### Scan Callback — Match by Device Name or UUID
+
+```c
+static void scan_result_cb(wiced_bt_ble_scan_results_t *p_scan_result,
+                            uint8_t *p_adv_data)
+{
+    if (p_scan_result == NULL) return;  /* Scan complete */
+
+    /* Parse advertisement for local name */
+    uint8_t *p_name = NULL;
+    uint8_t  name_len = 0;
+    p_name = wiced_bt_ble_check_advertising_data(p_adv_data,
+                 BTM_BLE_ADVERT_TYPE_NAME_COMPLETE, &name_len);
+
+    if (p_name && name_len > 0 && memcmp(p_name, "MyPeripheral", 12) == 0) {
+        /* Found target device — stop scan and connect */
+        wiced_bt_ble_scan(BTM_BLE_SCAN_TYPE_NONE, true, scan_result_cb);
+
+        wiced_bt_gatt_le_connect(p_scan_result->remote_bd_addr,
+                                  p_scan_result->ble_addr_type,
+                                  BLE_CONN_MODE_HIGH_DUTY, true);
+    }
+}
+```
+
+### GATT Event Handler — Discovery + Notification
+
+```c
+static wiced_bt_gatt_status_t gatt_callback(wiced_bt_gatt_evt_t event,
+                                             wiced_bt_gatt_event_data_t *p_data)
+{
+    switch (event) {
+    case GATT_CONNECTION_STATUS_EVT:
+        if (p_data->connection_status.connected) {
+            conn_id = p_data->connection_status.conn_id;
+            /* Start service discovery */
+            wiced_bt_gatt_client_send_discover(conn_id,
+                GATT_DISCOVER_SERVICES_ALL, NULL);
+        } else {
+            /* Disconnected — restart scan after delay */
+            conn_id = 0;
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            wiced_bt_ble_scan(BTM_BLE_SCAN_TYPE_HIGH_DUTY, true, scan_result_cb);
+        }
+        break;
+
+    case GATT_DISCOVERY_RESULT_EVT:
+        handle_discovery_result(p_data);
+        break;
+
+    case GATT_DISCOVERY_CPLT_EVT:
+        handle_discovery_complete(p_data);
+        break;
+
+    case GATT_OPERATION_CPLT_EVT:
+        if (p_data->operation_complete.op == GATTC_OPTYPE_NOTIFICATION) {
+            handle_notification(p_data);
+        }
+        break;
+
+    default:
+        break;
+    }
+    return WICED_BT_GATT_SUCCESS;
+}
+```
+
+### 128-bit Vendor UUID Matching (CRITICAL: Little-Endian Byte Order)
+
+BLE stores 128-bit UUIDs in **little-endian** byte order. When matching a vendor UUID from a spec or phone app (which displays big-endian), you must reverse it:
+
+```c
+/* UUID from spec/LightBlue: 3950866D-BE3F-4810-8C78-999E9E58A3A6
+ * Stored little-endian for btstack comparison: */
+static const uint8_t TARGET_CHAR_UUID_128[] = {
+    0xA6, 0xA3, 0x58, 0x9E, 0x9E, 0x99, 0x78, 0x8C,
+    0x10, 0x48, 0x3F, 0xBE, 0x6D, 0x86, 0x50, 0x39
+};
+
+/* Match during GATT_DISCOVERY_RESULT_EVT: */
+if (p_char->char_uuid.len == LEN_UUID_128 &&
+    memcmp(p_char->char_uuid.uu.uuid128, TARGET_CHAR_UUID_128, 16) == 0) {
+    target_char_handle = p_char->val_handle;
+    target_cccd_handle = p_char->val_handle + 1; /* CCCD is typically next handle */
+}
+```
+
+> ⚠️ **Do NOT use a "first characteristic with NOTIFY property" heuristic** — this often matches Generic Access or other standard characteristics. Always match by exact UUID.
+
+### Enabling Notifications — Static CCCD Write Buffer (CRITICAL)
+
+The CCCD (Client Characteristic Configuration Descriptor) write tells the peripheral to start sending notifications. The write buffer **MUST be static** — btstack reads it asynchronously after the function returns:
+
+```c
+void enable_notifications(uint16_t conn_id, uint16_t cccd_handle)
+{
+    /* MUST be static — btstack reads asynchronously after this function returns */
+    static uint8_t cccd_val[] = { GATT_CLIENT_CONFIG_NOTIFICATION & 0xFF,
+                                   (GATT_CLIENT_CONFIG_NOTIFICATION >> 8) & 0xFF };
+    static wiced_bt_gatt_write_hdr_t write_hdr;
+
+    write_hdr.handle   = cccd_handle;
+    write_hdr.offset   = 0;
+    write_hdr.len      = 2;
+    write_hdr.auth_req = GATT_AUTH_REQ_NONE;
+
+    wiced_bt_gatt_status_t status = wiced_bt_gatt_client_send_write(
+        conn_id, GATT_REQ_WRITE, &write_hdr, cccd_val, NULL);
+
+    printf("[BLE] CCCD write (handle 0x%04X): %s\n", cccd_handle,
+           status == WICED_BT_GATT_SUCCESS ? "OK" : "FAILED");
+}
+```
+
+> ⚠️ **Stack-local buffers for CCCD writes = silent failure.** The write appears to succeed but notifications never arrive because btstack reads freed stack memory. This is the #2 most common BLE integration bug.
+
+### Notification Data Handling
+
+```c
+static void handle_notification(wiced_bt_gatt_event_data_t *p_data)
+{
+    wiced_bt_gatt_operation_complete_t *op = &p_data->operation_complete;
+
+    if (op->response_data.att_value.handle == target_char_handle) {
+        uint8_t *val = op->response_data.att_value.p_data;
+        uint16_t len = op->response_data.att_value.len;
+
+        if (len >= 1) {
+            uint8_t sensor_state = val[0];
+            /* Process notification data — update shared state, send via IPC, etc. */
+        }
+    }
+}
+```
+
+## BLE Central — Reconnection on Disconnect
+
+The peripheral may power-cycle, go out of range, or drop the connection. Always handle `GATT_CONNECTION_STATUS_EVT` with `connected == false`:
+
+```c
+case GATT_CONNECTION_STATUS_EVT:
+    if (!p_data->connection_status.connected) {
+        printf("[BLE] Disconnected (reason: 0x%02X). Reconnect in 3s...\n",
+               p_data->connection_status.reason);
+        conn_id = 0;
+        target_char_handle = 0;
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        wiced_bt_ble_scan(BTM_BLE_SCAN_TYPE_HIGH_DUTY, true, scan_result_cb);
+    }
+    break;
+```
+
+## Common BLE Mistakes
+
+| Mistake | Symptom | Fix |
+|---------|---------|-----|
+| Calling `wiced_bt_stack_init()` before radio FW loaded | BLE does nothing, no events | Wait for `cy_wcm_init()` to complete first |
+| Stack-local CCCD write buffer | Write "succeeds" but no notifications arrive | Make `cccd_val[]` and `write_hdr` static |
+| Big-endian UUID comparison | Characteristic discovery never matches | Store UUID bytes in little-endian order |
+| "First NOTIFY char" heuristic | Subscribes to wrong characteristic | Match by exact 128-bit UUID |
+| No reconnect on disconnect | Device connects once, never recovers | Re-scan after disconnect with delay |
+| Scanning during active connection | Wastes power, may cause instability | Stop scan before `gatt_le_connect()` |
+| FreeRTOS task stack < 4096 for BLE | Stack overflow during GATT operations | Use 4096+ words for BLE task |

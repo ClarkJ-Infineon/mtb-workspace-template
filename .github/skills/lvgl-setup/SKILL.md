@@ -192,7 +192,15 @@ CY_SECTION(".cy_gpu_buf") LV_ATTRIBUTE_MEM_ALIGN
 static void disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
 {
     vg_lite_finish();  /* CRITICAL: wait for GPU before swapping */
+
+    /* Drain stale DC VSYNC notification — prevents tearing on continuous animations.
+     * Without this, ulTaskNotifyTake() below returns immediately with a stale
+     * notification queued during GPU rendering, before DC latches new buffer. */
+    ulTaskNotifyTake(pdTRUE, 0);  /* Non-blocking drain */
+
     Cy_GFXSS_Set_FrameBuffer((GFXSS_Type*) GFXSS, (uint32_t*) color_p, &gfx_context);
+
+    /* Wait for fresh VSYNC confirming DC latched the new buffer address */
     if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY))
         lv_display_flush_ready(disp);
 }
@@ -381,8 +389,9 @@ The PSOC Edge E84 GCNANO (ChipID 0x265) has a preference score of 80/255 in LVGL
 3. **`translate_x`/`translate_y` animations** invalidate both old and new positions — minimize moving area
 4. **`LV_VG_LITE_FLUSH_MAX_COUNT = 0`** enables CPU/GPU parallelism — critical for text-heavy UIs
 5. **Keep concurrent animations low** — 4-5 simultaneous animations is the practical limit
-6. **`shadow_width` on objects with text children** forces SW fallback — use `border_width` + `border_opa`
+6. **`shadow_width > 0` on ANY animated object is expensive** — even without text children, shadow rendering at 30fps causes frame drops. Use `bg_color` + `bg_opa` on a larger circle/rect instead. Shadows are only acceptable on static (non-animated) objects
 7. **Prefer LVGL drawing primitives over bitmap assets for animated elements** — arcs, lines, circles are GPU-native, resolution-independent, and zero asset management. Reserve bitmaps for static content (hero images, photos)
+8. **Guard periodic refresh callbacks with state caching** — `lv_obj_set_style_*()` ALWAYS marks the object dirty (triggers full-frame re-render), even if the value hasn't changed. Cache previous state and skip unchanged updates
 
 ### Recommended `lv_conf.h` Tuning (Performance)
 
