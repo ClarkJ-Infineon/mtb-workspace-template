@@ -14,6 +14,7 @@ Read `CONTEXT.md` first for current software versions, target device, and kit.
 > - `reference/project-structures.md` — project layouts for all device families
 > - `reference/build-system-patterns.md` — Makefile patterns, COMPONENTS, DEFINES, common.mk
 > - `reference/middleware-compatibility.md` — library versions, super-dependencies, compatibility matrix
+> - `reference/peripheral-init-reference.md` — peripheral init sequences, BSP mappings, config struct names
 
 ---
 
